@@ -9,7 +9,8 @@
     "dev": "vite --host 0.0.0.0 --port 1420 --strictPort",
     "build": "vite build",
     "tauri": "tauri",
-    "test:ui": "node tests/ui_mock_test.mjs && node tests/overlay_mock_test.mjs"
+    "test:ui": "node tests/ui_mock_test.mjs && node tests/overlay_mock_test.mjs",
+    "test:version": "node tests/version_script_test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"

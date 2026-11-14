@@ -36,4 +36,5 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:ui
+      - run: npm run test:version
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
