@@ -5,11 +5,11 @@ edition = "2021"
 links = "tauri-plugin-mobile-audio"
 
 [build-dependencies]
-tauri-plugin = { version = "2", features = ["build"] }
+tauri-plugin = { version = "2.7.2", features = ["build"] }
 
 [dependencies]
-tauri = { version = "2" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-crossbeam-channel = "0.5"
-jni = "0.21"
+tauri = { version = "2.12.5" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+crossbeam-channel = "0.5.17"
+jni = "0.21.1"

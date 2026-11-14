@@ -37,4 +37,5 @@ jobs:
       - run: npm run build
       - run: npm run test:ui
       - run: npm run test:version
+      - run: npm run test:android-config
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
