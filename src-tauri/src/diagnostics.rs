@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::{collections::VecDeque, io::Write, sync::Mutex, time::{SystemTime, UNIX_EPOCH}};
 use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
+use zeroize::Zeroize;
 
 const MAX_ENTRIES: usize = 300;
 const MAX_MESSAGE_CHARS: usize = 1200;
@@ -67,6 +68,9 @@ pub struct Trace {
     session_id: u64,
     secrets: Vec<String>,
     #[cfg(test)] capture: Option<std::sync::Arc<Mutex<Vec<String>>>>,
+}
+impl Drop for Trace {
+    fn drop(&mut self) { self.secrets.zeroize(); }
 }
 impl Trace {
     fn make(app: Option<AppHandle>, session_id: u64, api_key: &str, proxy_url: &str) -> Self {

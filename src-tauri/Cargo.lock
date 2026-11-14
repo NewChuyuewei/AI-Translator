@@ -1250,6 +1250,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "url",
+ "zeroize",
 ]
 
 [[package]]

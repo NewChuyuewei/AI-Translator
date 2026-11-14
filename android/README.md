@@ -9,7 +9,7 @@ Implemented in the native module:
 - Compose control and caption UI;
 - screenshot protection for API keys and transcripts;
 - Android Keystore-backed AES-256-GCM API-key storage;
-- bounded Gemini WebSocket messages and redacted transport failures;
+- bounded Gemini WebSocket messages, redacted transport failures, explicit setup-complete state gating, and a 25-second initialization timeout;
 - native `AudioRecord` microphone capture using 40 ms PCM16 frames and silence suppression with a one-second VAD hangover;
 - bounded 240 ms audio queues and bounded WebSocket send backlog;
 - lifecycle-independent foreground service with notification stop control;
