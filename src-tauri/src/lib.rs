@@ -17,7 +17,7 @@ use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, Th
 use proxy::ProxyMode;
 use ring::{aead, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io::Write, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
+use std::{collections::HashSet, fs, io::{Read, Write}, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 
@@ -34,12 +34,14 @@ struct StartOptions {
     #[serde(default)] system_device: Option<String>,
     #[serde(default)] playback_enabled: bool,
     #[serde(default)] playback_device: Option<String>,
+    #[serde(default = "default_token_saver")] token_saver: bool,
     #[serde(default)] proxy_mode: ProxyMode,
     #[serde(default)] proxy_url: String,
     #[serde(default = "default_overlay_scale")] overlay_scale: f64,
 }
 fn default_other() -> String { "en".into() }
 fn default_overlay_scale() -> f64 { 1.0 }
+fn default_token_saver() -> bool { true }
 impl StartOptions {
     fn gemini(&self) -> GeminiOptions { GeminiOptions { api_key: self.api_key.clone(), model: self.model, thinking_level: self.thinking_level, transcription_mode: self.transcription_mode, target_language: self.target_language.clone(), bidirectional: self.bidirectional, other_language: self.other_language.clone() } }
     #[cfg(not(target_os = "android"))]
@@ -59,6 +61,7 @@ const SETTINGS_FILE: &str = "settings.json";
 const SECRETS_FILE: &str = "secrets.enc.json";
 const SECRET_AAD: &[u8] = b"com.gemini.live.translator/secrets/v1";
 const PBKDF2_ITERATIONS: u32 = 210_000;
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,13 +140,21 @@ fn write_settings(app: &AppHandle, settings: &PersistedSettings) -> Result<()> {
     write_private(&config_path(app, SETTINGS_FILE)?, &bytes)
 }
 
+fn read_bounded(path: &Path, description: &str) -> Result<Vec<u8>> {
+    let file = fs::File::open(path).with_context(|| format!("无法读取{description}"))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes)
+        .with_context(|| format!("无法读取{description}"))?;
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(anyhow!("{description}超过 1 MiB 安全限制"));
+    }
+    Ok(bytes)
+}
+
 fn read_settings(app: &AppHandle) -> Result<Option<PersistedSettings>> {
     let path = config_path(app, SETTINGS_FILE)?;
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).context("无法读取用户设置"),
-    };
+    if !path.try_exists().context("无法检查用户设置")? { return Ok(None); }
+    let bytes = read_bounded(&path, "用户设置")?;
     let mut settings: PersistedSettings = serde_json::from_slice(&bytes).context("用户设置文件已损坏")?;
     if settings.version == 1 {
         // 0.1.5 development snapshots briefly stored opted-in secrets in this
@@ -184,8 +195,10 @@ fn encrypt_secrets(password: &str, payload: &SecretPayload) -> Result<Vec<u8>> {
     let mut salt = [0u8; 16]; let mut nonce = [0u8; 12];
     random.fill(&mut salt).map_err(|_| anyhow!("无法生成加密随机数"))?;
     random.fill(&mut nonce).map_err(|_| anyhow!("无法生成加密随机数"))?;
-    let key_bytes = derive_vault_key(password, &salt, PBKDF2_ITERATIONS)?;
-    let key = aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化加密器"))?);
+    let mut key_bytes = derive_vault_key(password, &salt, PBKDF2_ITERATIONS)?;
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化加密器"));
+    key_bytes.fill(0);
+    let key = aead::LessSafeKey::new(unbound?);
     let mut plaintext = serde_json::to_vec(payload).context("无法编码敏感配置")?;
     key.seal_in_place_append_tag(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut plaintext)
         .map_err(|_| anyhow!("无法加密敏感配置"))?;
@@ -203,15 +216,23 @@ fn decrypt_secrets(password: &str, bytes: &[u8]) -> Result<SecretPayload> {
         || !(100_000..=2_000_000).contains(&encrypted.iterations) {
         return Err(anyhow!("不支持的加密配置格式"));
     }
-    let salt = STANDARD.decode(&encrypted.salt).map_err(|_| anyhow!("加密配置已损坏"))?;
+    let salt_bytes = STANDARD.decode(&encrypted.salt).map_err(|_| anyhow!("加密配置已损坏"))?;
+    let salt: [u8; 16] = salt_bytes.try_into().map_err(|_| anyhow!("加密配置已损坏"))?;
     let nonce_bytes = STANDARD.decode(&encrypted.nonce).map_err(|_| anyhow!("加密配置已损坏"))?;
     let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| anyhow!("加密配置已损坏"))?;
     let mut ciphertext = STANDARD.decode(&encrypted.ciphertext).map_err(|_| anyhow!("加密配置已损坏"))?;
-    let key_bytes = derive_vault_key(password, &salt, encrypted.iterations)?;
-    let key = aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化解密器"))?);
-    let plaintext = key.open_in_place(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut ciphertext)
-        .map_err(|_| anyhow!("密码错误或加密配置已损坏"))?;
-    serde_json::from_slice(plaintext).map_err(|_| anyhow!("密码错误或加密配置已损坏"))
+    let mut key_bytes = derive_vault_key(password, &salt, encrypted.iterations)?;
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化解密器"));
+    key_bytes.fill(0);
+    let key = aead::LessSafeKey::new(unbound?);
+    let plaintext_len = {
+        let plaintext = key.open_in_place(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut ciphertext)
+            .map_err(|_| anyhow!("密码错误或加密配置已损坏"))?;
+        plaintext.len()
+    };
+    let result = serde_json::from_slice(&ciphertext[..plaintext_len]).map_err(|_| anyhow!("密码错误或加密配置已损坏"));
+    ciphertext.fill(0);
+    result
 }
 
 fn write_encrypted_secrets(app: &AppHandle, password: &str, payload: &SecretPayload) -> Result<()> {
@@ -229,7 +250,11 @@ fn remove_encrypted_secrets(app: &AppHandle) -> Result<()> {
 }
 
 fn read_encrypted_secrets(app: &AppHandle, password: &str) -> Result<SecretPayload> {
-    let bytes = fs::read(config_path(app, SECRETS_FILE)?).context("没有找到加密配置；请填写 API Key 后重新保存")?;
+    let path = config_path(app, SECRETS_FILE)?;
+    if !path.try_exists().context("无法检查加密配置")? {
+        return Err(anyhow!("没有找到加密配置；请填写 API Key 后重新保存"));
+    }
+    let bytes = read_bounded(&path, "加密配置")?;
     decrypt_secrets(password, &bytes)
 }
 
@@ -515,9 +540,11 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
     let connected_at = tokio::time::Instant::now();
     if *cancel.borrow() { return Ok(()); }
     trace.info("Gemini 已初始化，正在准备音频采集和权限");
-    let (pcm_tx, mut pcm_rx) = mpsc::channel::<Vec<u8>>(12);
+    // Six 40 ms frames absorb transient network jitter while capping queued
+    // audio at 240 ms. Older speech is less useful than bounded latency.
+    let (pcm_tx, mut pcm_rx) = mpsc::channel::<Vec<u8>>(6);
     let (error_tx, mut error_rx) = mpsc::unbounded_channel::<String>();
-    let mut router = AudioRouter::new(options.mode, pcm_tx);
+    let mut router = AudioRouter::new(options.mode, pcm_tx, options.token_saver);
 
     #[cfg(not(target_os="android"))]
     {
@@ -533,7 +560,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
         use audio_router::{RawAudio, Source};
         use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
         use std::time::Duration;
-        let (tx, rx) = crossbeam_channel::bounded(64);
+        let (tx, rx) = crossbeam_channel::bounded(12);
         tauri_plugin_mobile_audio::set_sender(Some(tx));
         let raw = router.raw_sender.clone(); let err = error_tx.clone();
         let stop = Arc::new(AtomicBool::new(false)); let worker_stop = stop.clone();

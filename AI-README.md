@@ -9,11 +9,11 @@
 - 增加 `gemini-3.5-live-translate-preview`：每个会话固定**一个目标语言**，原文及译文字幕，可选择播放译音；不是双向翻译。当前 `echoTargetLanguage=false`：输入已是目标语言时不会复述。
 - 增加 `gemini-3.5-transcribe-live`：用户明确选择**只实时转写原文，不做翻译，也不播放译音**；不得私自串接收费的二次翻译服务。目标语言、双向和译音控制在该模式不可用。默认 VERBATIM；可选 SMART，它只整理原文，可能删除口头语或修改格式。
 - 控制台、桌面字幕窗、Android 悬浮窗和前台通知应真实区分「翻译」与「转写」，不能在转写模式显示等待译文或启动播放器。
-- 当前源码版本 **0.1.6**；历史 0.1.3 的 APK / Windows 包**没有** 3.5 功能，不能冒充新版交付。0.1.6 尚未生成或验证安装包。
+- 当前源码版本 **0.2.0**；历史 0.1.3 的 APK / Windows 包**没有** 3.5 功能，不能冒充新版交付。0.2.0 尚未生成或验证安装包。
 
 ## 2. 最重要的未解决问题：Android 启动闪退
 
-用户报告：安装 0.1.3 ARM64 debug APK 后，Android 15+ 的 AOSP 和 Xiaomi HyperOS 手机上启动即闪退。**还没有用户崩溃堆栈，没有确认根因，0.1.4 和当前 0.1.6 源码都没有针对该闪退的已证实修复，也未在用户手机验证。**不要声称启动问题已经解决。
+用户报告：安装 0.1.3 ARM64 debug APK 后，Android 15+ 的 AOSP 和 Xiaomi HyperOS 手机上启动即闪退。**还没有用户崩溃堆栈，没有确认根因，0.1.4 和当前 0.2.0 源码都没有针对该闪退的已证实修复，也未在用户手机验证。**不要声称启动问题已经解决。
 
 既往检查了 APK manifest、ABI、JNI 符号、ELF/ZIP 16 KB 对齐、签名和 Tauri/Tao 的 Android context 初始化，未发现可确定的原因；静态检查通过不等于运行正常。尝试在无 KVM 的 x86_64 主机使用 Android 15 Google APIs 模拟器及 ARM native bridge，启动极慢且在结束尝试前未完成系统 boot，**没有安装或运行 APK 的有效结果**；这也不能代替 ARM 真机。
 
@@ -32,7 +32,7 @@
 
 不要复用 `live_translate` 作为 3.5 的序列化值：历史兼容别名 `live_translate` 目前指向 `ExtendedThinking`；改动它会破坏旧配置语义。两种 3.5 模型的 setup 均有模拟断言，真实服务端行为仍需用用户自己有权限的 Key 验证。
 
-输入音频：16 kHz 单声道 PCM16 little-endian，约 100 ms／帧，`realtimeInput.audio.mimeType=audio/pcm;rate=16000`；翻译音频输出为 24 kHz 单声道 PCM16。服务端 `interimInputTranscription` 是可替换猜测，`inputTranscription` 为最终权威分段，两个字段的 camelCase 和 snake_case 均支持。`lib.rs::replace_transcript` 显示最新一句，猜测不断替换、最终文本优先，不将假设和最终值追加在一起；它不是完整会议记录或带说话人分离的转录系统。
+输入音频：16 kHz 单声道 PCM16 little-endian，约 40 ms／帧；默认静音节省模式会在连续近静音约 1 秒 后暂停发送并在检测到讲话后恢复，以降低 AI Studio 空闲音频 Token／带宽消耗。Google 的 20k Token/min 等配额按项目在服务端强制执行，客户端不能绕过，也不应把本地静音门描述成精确计费器。`realtimeInput.audio.mimeType=audio/pcm;rate=16000`；翻译音频输出为 24 kHz 单声道 PCM16。服务端 `interimInputTranscription` 是可替换猜测，`inputTranscription` 为最终权威分段，两个字段的 camelCase 和 snake_case 均支持。`lib.rs::replace_transcript` 显示最新一句，猜测不断替换、最终文本优先，不将假设和最终值追加在一起；它不是完整会议记录或带说话人分离的转录系统。
 
 3.5 转写官方会话最长 10 分钟；约连接后 9 分钟提醒，当前**不自动续接、也不恢复上下文**。未实现说话人分离、逐词时间戳、指定输入语言、热词或文本转译。翻译模型的片段合并仍是启发式，真实服务事件可能出现未覆盖边界。
 
@@ -85,7 +85,7 @@ Windows GNU 交叉构建及 NSIS 命令见 `README.md`；GNU 免安装版的 `We
 
 ## 6. 当前验证边界与下一步
 
-- 0.1.6 当前源码的本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入并在 GitHub runner 试跑，已根据 Android SDK、macOS runner／SDK 错误继续修正，但完整发布仍待再次验证；发布工作流会生成 Windows NSIS 与便携 ZIP、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的 Android ARM64 APK。尚未生成或验证 0.1.6 安装包。
+- 0.2.0 当前源码的本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入并在 GitHub runner 试跑，已根据 Android SDK、macOS runner／SDK 错误继续修正，但完整发布仍待再次验证；发布工作流会生成 Windows NSIS 与便携 ZIP、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的 Android ARM64 APK。尚未生成或验证 0.2.0 安装包。
 - 0.1.4 前端 `npm run build`、JSDOM 控制台 / 字幕窗模拟测试通过；Linux Rust 单元和本地模拟 WebSocket 测试 **30/30** 通过。Android ARM64 debug APK 已构建，静态确认 0.1.4 / versionCode 1004、16 KB ZIP/ELF 对齐及与 0.1.3 相同的调试签名；这些检查不能证明能在手机上启动。Windows x64 GNU release 已交叉编译，NSIS 安装包与便携 ZIP 已构建并静态检查，**未在 Windows 真机运行**。
 - 本次交付文件名：`Gemini-Live-Translator-0.1.4-arm64-debug.apk`、`Gemini-Live-Translator-0.1.4-Windows-Setup.exe`、`Gemini-Live-Translator-0.1.4-Windows-portable.zip`、`Gemini-Live-Translator-0.1.4-source.zip`。源码包内含本文件，但不包含其他安装包或签名密钥；新会话需要继续开发时请提供源码包。
 - 没有真实 Gemini API Key，也没有可用真机，**尚未验证** 3.5 模型的真实 setup 接受情况、各语种 interim/final 事件、译音、代理、音频捕获及目标平台 UI。账号、地区和配额可能限制模型。

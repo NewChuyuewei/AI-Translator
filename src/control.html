@@ -53,7 +53,8 @@
         <label class="mode"><input type="radio" name="mode" value="mixed"><span class="mode-content"><span class="mode-icon">✳</span><strong>混合音源</strong><small>同时采集两路</small></span></label>
       </div>
       <div class="split-row"><label class="field"><span class="field-label">麦克风设备</span><select id="microphone-device"><option value="">系统默认</option></select></label><label class="field"><span class="field-label">系统音频源</span><select id="system-device"><option value="">系统默认</option></select></label></div>
-      <div class="playback-box"><div><strong>播放翻译语音</strong><p id="playback-hint">Gemini 输出 24 kHz PCM；开启前请确认不会形成回声。</p></div><label class="switch"><input id="playback-enabled" type="checkbox"><span></span></label></div>
+      <div class="playback-box"><div><strong>静音时节省 Token</strong><p>连续静音约 1 秒后暂停上传，检测到讲话立即恢复；配额仍由 Google 按项目强制执行。</p></div><label class="switch"><input id="token-saver" type="checkbox" checked><span></span></label></div>
+      <div class="playback-box compact-divider"><div><strong>播放翻译语音</strong><p id="playback-hint">Gemini 输出 24 kHz PCM；开启前请确认不会形成回声。</p></div><label class="switch"><input id="playback-enabled" type="checkbox"><span></span></label></div>
       <label class="field playback-device-row"><span class="field-label">译音输出设备</span><select id="playback-device"><option value="">系统默认</option></select></label>
     </section>
 

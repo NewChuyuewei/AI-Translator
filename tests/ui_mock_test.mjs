@@ -98,6 +98,7 @@ assert.ok($('notice').textContent.includes('已加密保存'));
 $('start-stop').click(); await wait(0);
 assert.equal(calls.filter(c=>c.cmd==='start_translation').at(-1).args.options.proxyMode, 'auto');
 assert.equal(calls.filter(c=>c.cmd==='start_translation').at(-1).args.options.proxyUrl, '');
+assert.equal(calls.filter(c=>c.cmd==='start_translation').at(-1).args.options.tokenSaver, true);
 assert.equal($('button-text').textContent, '取消连接'); assert.equal($('start-stop').disabled, false);
 $('start-stop').click(); await wait(30);
 assert.equal($('button-text').textContent, '开始翻译');

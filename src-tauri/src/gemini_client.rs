@@ -54,7 +54,9 @@ fn valid_language(value: &str) -> bool {
 }
 impl GeminiOptions {
     pub fn validate(&self) -> Result<()> {
-        if self.api_key.trim().is_empty() { return Err(anyhow!("请填写 Gemini API Key")); }
+        let key = self.api_key.trim();
+        if key.is_empty() { return Err(anyhow!("请填写 Gemini API Key")); }
+        if key.len() > 512 { return Err(anyhow!("Gemini API Key 长度无效")); }
         if !valid_language(&self.target_language) || !valid_language(&self.other_language) { return Err(anyhow!("语言代码必须是有效的 BCP-47 字母/连字符形式")); }
         if self.bidirectional && !self.model.supports_bidirectional_instruction() {
             return Err(anyhow!("此模型不支持双向自动切换；请选择单向翻译或转写"));
@@ -473,6 +475,15 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
         assert!(error.contains("403") && logs.contains("403"));
         assert!(!logs.contains("PRIVATE-BODY") && !error.contains("PRIVATE-BODY"));
         assert!(!logs.contains("PRIVATE-API-KEY-123") && !error.contains("PRIVATE-API-KEY-123"));
+    }
+
+    #[test] fn rejects_oversized_credentials_and_invalid_languages() {
+        let mut options = opts(ModelKind::GeneralLive);
+        options.api_key = "x".repeat(513);
+        assert!(options.validate().is_err());
+        options.api_key = "test".into();
+        options.target_language = "../../secret".into();
+        assert!(options.validate().is_err());
     }
 
     #[test] fn config_fields_are_model_specific() {
