@@ -22,8 +22,8 @@ extensions.configure<LibraryExtension> {
     }
 }
 
-// kotlinOptions and its String jvmTarget are deprecated. Configure every
-// Kotlin compile task through the typed compilerOptions API instead.
+// Gradle 9.9.1 and Kotlin 2.4.21 share the JVM 25-capable compiler API,
+// avoiding the stale JvmTarget class that Gradle 9.6 exposed to build scripts.
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_25)

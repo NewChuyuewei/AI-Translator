@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const KOTLIN_VERSION = '2.4.21';
+const GRADLE_VERSION = '9.9.1';
 const propertiesPath = process.argv[2] || 'src-tauri/gen/android/gradle.properties';
 const current = fs.readFileSync(propertiesPath, 'utf8');
 const newline = current.includes('\r\n') ? '\r\n' : '\n';
@@ -11,8 +12,15 @@ const suppressions = new Set([
   'JAVA_COMPILE_DEPRECATED_SOURCE_TARGET',
 ]);
 const output = [];
+const suppressionComments = new Set([
+  '# Tauri 2 currently requires AGP legacy Kotlin/new-DSL compatibility flags.',
+  '# Suppress only those known upstream migration warnings; do not hide other warnings.',
+]);
 
 for (const line of current.split(/\r?\n/)) {
+  if (suppressionComments.has(line)) {
+    continue;
+  }
   if (line.startsWith('android.proguard.failOnMissingFiles=')) {
     // AGP's secure default is true. Keeping the old false override both hides
     // packaging errors and is unsupported in AGP 10.
@@ -55,6 +63,16 @@ if (fs.existsSync(rootBuild)) {
   fs.writeFileSync(rootBuild, modern);
 }
 
+const wrapperProperties = path.join(androidRoot, 'gradle', 'wrapper', 'gradle-wrapper.properties');
+if (fs.existsSync(wrapperProperties)) {
+  const wrapper = fs.readFileSync(wrapperProperties, 'utf8');
+  const modern = wrapper.replace(/gradle-[0-9.]+-bin\.zip/, `gradle-${GRADLE_VERSION}-bin.zip`);
+  if (modern === wrapper && !wrapper.includes(`gradle-${GRADLE_VERSION}-bin.zip`)) {
+    throw new Error(`Could not update the generated Gradle wrapper in ${wrapperProperties}`);
+  }
+  fs.writeFileSync(wrapperProperties, modern);
+}
+
 const appBuild = path.join(androidRoot, 'app', 'build.gradle.kts');
 if (fs.existsSync(appBuild)) {
   const buildScript = fs.readFileSync(appBuild, 'utf8');
@@ -71,7 +89,7 @@ if (fs.existsSync(appBuild)) {
     .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17|25)"\s*\}/g, '')
     .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17|25)"/g, '');
   if (!modern.includes('JvmTarget.JVM_25')) {
-    modern += `${newline}${newline}// Kotlin ${KOTLIN_VERSION} and JDK 25 compile the generated app to Java 25 bytecode.${newline}` +
+    modern += `${newline}${newline}// Gradle ${GRADLE_VERSION} and Kotlin ${KOTLIN_VERSION} share the JVM 25-capable API.${newline}` +
       `tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {${newline}` +
       `    compilerOptions {${newline}` +
       `        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)${newline}` +

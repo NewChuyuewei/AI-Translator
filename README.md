@@ -184,12 +184,12 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 
 这是开发用 debug 包，可调试且允许明文网络流量配置，不应用于正式发布。Gemini 音频连接本身使用加密 WSS。源码包不包含调试 keystore：自行在另一台电脑构建的 APK 通常会使用不同的签名，因而可能无法覆盖此前安装的版本。
 
-源码包不包含生成目录 `src-tauri/gen/`、已下载的 SDK/NDK、`node_modules/` 或构建产物；这些要在本机生成。Actions 初始化工程后会运行 `scripts/configure-android-gradle.mjs`：删除已弃用且降低校验强度的 `android.proguard.failOnMissingFiles=false`，将生成应用的 `android {}` 迁移到公开 `ApplicationExtension`，并仅抑制 Tauri 2 当前仍需要的 AGP 兼容选项／旧 variant DSL 迁移提示，不会全局关闭 Gradle 或 Kotlin 警告。项目自己的 mobile-audio 插件已改用公开 `LibraryExtension` 和类型安全的 Kotlin `compilerOptions`。GitHub Actions 使用 JDK 25 运行 Gradle；初始化后会把 Tauri 模板自带的 Kotlin Gradle Plugin 2.2.10 升级到稳定版 2.4.21（该版本提供 `JvmTarget.JVM_25`），应用与插件均输出 Java/Kotlin 25 字节码。生成的 Tauri Kotlin 文件只对其文件内的旧 Android 兼容调用使用 `DEPRECATION` 豁免，项目 Kotlin 代码的其他警告仍保持可见；JDK 25 编译 Tauri 的 Java 8 兼容模块所产生的 source/target 提示按 AGP 官方属性精确抑制。Cargo 依赖内 Tauri 自身的 Kotlin 源码仍可能报告上游生命周期 API／Java 类型提示，需等待 Tauri 模板升级，项目不会修改 Cargo registry 中的第三方源码来隐藏它。准备 Android Studio、JDK 25、SDK Platform-Tools、SDK 平台、Build Tools 和 NDK。使用本项目锁定的 Tauri CLI 初始化时，本次生成的工程使用 `compileSdk/targetSdk 37`，插件使用 `compileSdk 37`；建议在 SDK Manager 中安装 API 36、37 和相应 Build Tools，以及 NDK 28.2.13676358。Android 版本号由 `src-tauri/tauri.android.conf.json` 覆盖；版本或 Tauri 模板升级后以生成工程为准。
+源码包不包含生成目录 `src-tauri/gen/`、已下载的 SDK/NDK、`node_modules/` 或构建产物；这些要在本机生成。Actions 初始化工程后会运行 `scripts/configure-android-gradle.mjs`：删除已弃用且降低校验强度的 `android.proguard.failOnMissingFiles=false`，将生成应用的 `android {}` 迁移到公开 `ApplicationExtension`，并仅抑制 Tauri 2 当前仍需要的 AGP 兼容选项／旧 variant DSL 迁移提示，不会全局关闭 Gradle 或 Kotlin 警告。项目自己的 mobile-audio 插件已改用公开 `LibraryExtension` 和类型安全的 Kotlin `compilerOptions`。GitHub Actions 使用 JDK 25 运行 Gradle；初始化后会把 Tauri 模板自带的 Gradle 9.6.1 和 Kotlin Gradle Plugin 2.2.10 分别升级到稳定版 9.9.1 和 2.4.21。该组合提供一致的 JVM 25 DSL，应用与插件通过类型安全的 `JvmTarget.JVM_25` 输出 Java/Kotlin 25 字节码。生成的 Tauri Kotlin 文件只对其文件内的旧 Android 兼容调用使用 `DEPRECATION` 豁免，项目 Kotlin 代码的其他警告仍保持可见；JDK 25 编译 Tauri 的 Java 8 兼容模块所产生的 source/target 提示按 AGP 官方属性精确抑制。Cargo 依赖内 Tauri 自身的 Kotlin 源码仍可能报告上游生命周期 API／Java 类型提示，需等待 Tauri 模板升级，项目不会修改 Cargo registry 中的第三方源码来隐藏它。准备 Android Studio、JDK 25、SDK Platform-Tools、SDK 平台、Build Tools 和 NDK。使用本项目锁定的 Tauri CLI 初始化时，本次生成的工程使用 `compileSdk/targetSdk 37`，插件使用 `compileSdk 37`；建议在 SDK Manager 中安装 API 36、37 和相应 Build Tools，以及 NDK 28.2.13676358。Android 版本号由 `src-tauri/tauri.android.conf.json` 覆盖；版本或 Tauri 模板升级后以生成工程为准。
 
 macOS / Linux 示例（按本机目录调整）：
 
 ```bash
-export JAVA_HOME=/path/to/jdk-21
+export JAVA_HOME=/path/to/jdk-25
 export ANDROID_HOME="$HOME/Android/Sdk"
 export NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
