@@ -94,6 +94,7 @@ pub fn validate(mode: ProxyMode, address: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_os = "android"))]
 fn from_resolver_value(value: &str) -> Result<Route> {
     let value = value.trim();
     if value.eq_ignore_ascii_case("direct://") || value.eq_ignore_ascii_case("direct:///") {

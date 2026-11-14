@@ -4,7 +4,7 @@ Tauri 2 + Rust 的实时语音翻译与转写**开发原型**：支持麦克风�
 
 > **验证范围**：这是开发原型，开发环境没有真实 Gemini API Key，也没有 Windows、macOS 或 Android 真机；新模型、系统代理、音频和界面尚未完成真实服务端及目标设备端到端验证，不承诺任意网络或音频来源均可用。
 >
-> **Android 已知严重问题**：用户报告 0.1.3 ARM64 调试 APK 在 Android 15+（AOSP 和 Xiaomi HyperOS）安装后启动即闪退；尚无崩溃堆栈，根因未知，**0.1.4 及当前 0.1.5 源码都不应被视为已修复闪退**。排查需要手机系统错误报告，详见下方「测试与排障」和 `AI-README.md`。
+> **Android 已知严重问题**：用户报告 0.1.3 ARM64 调试 APK 在 Android 15+（AOSP 和 Xiaomi HyperOS）安装后启动即闪退；尚无崩溃堆栈，根因未知，**0.1.4 及当前 0.1.6 源码都不应被视为已修复闪退**。排查需要手机系统错误报告，详见下方「测试与排障」和 `AI-README.md`。
 
 ## 功能与使用
 
@@ -169,7 +169,7 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 - `.github/workflows/ci.yml`：推送到 `main`／`arena/**`、Pull Request 或手动触发时，执行前端构建、JSDOM 测试和锁定依赖的 Rust 单元测试。
 - `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK；全部成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
 
-发布前应先同步 `package.json`、Cargo、Tauri 和安装脚本版本，再创建同版本标签，例如 `git tag v0.1.5 && git push origin v0.1.5`。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
+发布前应先同步 `package.json`、Cargo、Tauri 和安装脚本版本，再创建同版本标签，例如 `git tag v0.1.6 && git push origin v0.1.6`。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
 
 ## Android 构建与安装
 

@@ -8,7 +8,9 @@ mod proxy;
 use anyhow::{anyhow, Context, Result};
 use audio_player::AudioPlayer;
 use base64::{engine::general_purpose::STANDARD, Engine};
-use audio_router::{AudioConfig, AudioRouter, AudioSourceMode};
+use audio_router::{AudioRouter, AudioSourceMode};
+#[cfg(not(target_os = "android"))]
+use audio_router::AudioConfig;
 use diagnostics::{LogEntry, LogStore, Trace};
 use futures_util::{SinkExt, StreamExt};
 use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, ThinkingLevel, TranscriptionMode};
@@ -40,6 +42,7 @@ fn default_other() -> String { "en".into() }
 fn default_overlay_scale() -> f64 { 1.0 }
 impl StartOptions {
     fn gemini(&self) -> GeminiOptions { GeminiOptions { api_key: self.api_key.clone(), model: self.model, thinking_level: self.thinking_level, transcription_mode: self.transcription_mode, target_language: self.target_language.clone(), bidirectional: self.bidirectional, other_language: self.other_language.clone() } }
+    #[cfg(not(target_os = "android"))]
     fn audio(&self) -> AudioConfig { AudioConfig { mode: self.mode, microphone_device: self.microphone_device.clone(), system_device: self.system_device.clone() } }
     fn validate(&self) -> Result<()> {
         self.gemini().validate()?;
@@ -734,17 +737,17 @@ pub fn run() {
             }
         });
     }
-    builder.setup(|app| {
+    builder.setup(|_app| {
         #[cfg(not(any(target_os="android", target_os="ios")))]
         {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
             let f8 = Shortcut::new(None, Code::F8);
-            app.handle().plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(move |app, shortcut, event| {
+            _app.handle().plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(move |app, shortcut, event| {
                 if shortcut == &f8 && event.state() == ShortcutState::Pressed { toggle_session(app); }
             }).build())?;
-            let registered = app.global_shortcut().register(f8).is_ok();
-            let state = app.state::<Controller>(); state.0.lock().unwrap().status.shortcut_available = registered;
-            if let Some(window) = app.get_webview_window("main") { let _ = window.set_ignore_cursor_events(true); }
+            let registered = _app.global_shortcut().register(f8).is_ok();
+            let state = _app.state::<Controller>(); state.0.lock().unwrap().status.shortcut_available = registered;
+            if let Some(window) = _app.get_webview_window("main") { let _ = window.set_ignore_cursor_events(true); }
         }
         Ok(())
     }).run(tauri::generate_context!()).expect("Tauri 启动失败");

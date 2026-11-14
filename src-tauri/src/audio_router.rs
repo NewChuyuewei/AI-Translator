@@ -2,7 +2,9 @@
 //! Input callbacks never block on networking. A bounded queue and a 100 ms
 //! mixing clock prevent either a silent source or a slow connection from
 //! growing memory without bound.
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
+#[cfg(not(target_os = "android"))]
+use anyhow::{anyhow, Context};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, Instant}};
@@ -15,11 +17,13 @@ const MAX_BUFFERED_SAMPLES: usize = FRAME_SAMPLES * 4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioSourceMode { MicrophoneOnly, SystemAudioOnly, Mixed }
+#[cfg(not(target_os = "android"))]
 impl AudioSourceMode {
     fn wants_mic(self) -> bool { matches!(self, Self::MicrophoneOnly | Self::Mixed) }
     fn wants_system(self) -> bool { matches!(self, Self::SystemAudioOnly | Self::Mixed) }
 }
 
+#[cfg(not(target_os = "android"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioConfig {
@@ -39,7 +43,13 @@ pub struct AudioDevices {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum Source { Mic, System }
+pub enum Source {
+    Mic,
+    // Linux has no system-capture producer yet, but the shared mixer still
+    // handles this source for Windows, macOS and Android.
+    #[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "android")), allow(dead_code))]
+    System,
+}
 pub struct RawAudio { pub source: Source, pub sample_rate: u32, pub channels: u16, pub data: Vec<f32> }
 
 /// Stateful streaming interpolator. The one-pole low-pass attenuates aliasing

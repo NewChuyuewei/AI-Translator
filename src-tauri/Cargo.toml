@@ -1,6 +1,6 @@
 [package]
 name = "gemini-live-translator"
-version = "0.1.5"
+version = "0.1.6"
 description = "Gemini Live real-time voice translation"
 authors = ["Gemini Live Translator contributors"]
 edition = "2021"
