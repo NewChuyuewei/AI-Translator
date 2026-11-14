@@ -22,11 +22,13 @@ import kotlinx.coroutines.launch
 
 class SessionForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private lateinit var overlay: OverlayCaptionController
     private val runtime: SessionRuntime get() = (application as TranslatorApplication).sessionRuntime
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        overlay = OverlayCaptionController(this) { runtime.stop() }
         scope.launch {
             runtime.session.collect { state ->
                 val text = when (state) {
@@ -37,8 +39,25 @@ class SessionForegroundService : Service() {
                     is SessionState.Failed -> state.safeMessage
                 }
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+                syncOverlay()
                 if (state is SessionState.Idle || state is SessionState.Failed) stopSelf()
             }
+        }
+        scope.launch {
+            runtime.caption.collect { caption -> overlay.update(caption) }
+        }
+        scope.launch {
+            runtime.overlayEnabled.collect { syncOverlay() }
+        }
+    }
+
+    private fun syncOverlay() {
+        val config = runtime.activeSessionConfig()
+        if (runtime.session.value is SessionState.Running && runtime.overlayEnabled.value && config != null) {
+            overlay.show(config.targetLanguage, config.audioSource, config.mode.transcriptionOnly)
+            overlay.update(runtime.caption.value)
+        } else {
+            overlay.hide()
         }
     }
 
@@ -56,6 +75,7 @@ class SessionForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        if (::overlay.isInitialized) overlay.hide()
         scope.cancel()
         super.onDestroy()
     }

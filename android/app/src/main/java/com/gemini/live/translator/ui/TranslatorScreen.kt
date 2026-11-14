@@ -3,9 +3,12 @@ package com.gemini.live.translator.ui
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -33,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -63,6 +67,9 @@ fun TranslatorScreen(viewModel: MainViewModel) {
             add(Manifest.permission.RECORD_AUDIO)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+    val overlayPermissionRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        viewModel.setOverlayEnabled(Settings.canDrawOverlays(context))
     }
     val projectionRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         authorizing = false
@@ -184,6 +191,45 @@ fun TranslatorScreen(viewModel: MainViewModel) {
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+
+                HorizontalDivider()
+                SectionTitle("悬浮字幕", "切换到其他应用后继续显示原文与译文")
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("在其他应用上方显示", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (Settings.canDrawOverlays(context)) "已获得系统悬浮窗权限" else "首次开启需要在系统设置中授权",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = state.overlayEnabled,
+                            onCheckedChange = { enabled ->
+                                if (!enabled) {
+                                    viewModel.setOverlayEnabled(false)
+                                } else if (Settings.canDrawOverlays(context)) {
+                                    viewModel.setOverlayEnabled(true)
+                                } else {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}"),
+                                    )
+                                    overlayPermissionRequest.launch(intent)
+                                }
+                            },
+                        )
+                    }
                 }
 
                 Button(
