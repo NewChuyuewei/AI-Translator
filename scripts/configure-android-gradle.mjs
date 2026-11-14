@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const KOTLIN_VERSION = '2.4.21';
-const GRADLE_VERSION = '9.9.1';
 const propertiesPath = process.argv[2] || 'src-tauri/gen/android/gradle.properties';
 const current = fs.readFileSync(propertiesPath, 'utf8');
 const newline = current.includes('\r\n') ? '\r\n' : '\n';
@@ -63,16 +62,6 @@ if (fs.existsSync(rootBuild)) {
   fs.writeFileSync(rootBuild, modern);
 }
 
-const wrapperProperties = path.join(androidRoot, 'gradle', 'wrapper', 'gradle-wrapper.properties');
-if (fs.existsSync(wrapperProperties)) {
-  const wrapper = fs.readFileSync(wrapperProperties, 'utf8');
-  const modern = wrapper.replace(/gradle-[0-9.]+-bin\.zip/, `gradle-${GRADLE_VERSION}-bin.zip`);
-  if (modern === wrapper && !wrapper.includes(`gradle-${GRADLE_VERSION}-bin.zip`)) {
-    throw new Error(`Could not update the generated Gradle wrapper in ${wrapperProperties}`);
-  }
-  fs.writeFileSync(wrapperProperties, modern);
-}
-
 const appBuild = path.join(androidRoot, 'app', 'build.gradle.kts');
 if (fs.existsSync(appBuild)) {
   const buildScript = fs.readFileSync(appBuild, 'utf8');
@@ -86,14 +75,14 @@ if (fs.existsSync(appBuild)) {
   modern = modern
     .replace(/JavaVersion\.VERSION_(?:1_8|17)/g, 'JavaVersion.VERSION_25')
     .replace(/\n\s*kotlin\s*\{\s*compilerOptions\s*\{\s*jvmTarget\s*=\s*(?:org\.jetbrains\.kotlin\.gradle\.dsl\.)?JvmTarget\.JVM_(?:1_8|17)\s*\}\s*\}/g, '')
-    .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17|25)"\s*\}/g, '')
-    .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17|25)"/g, '');
-  if (!modern.includes('JvmTarget.JVM_25')) {
-    modern += `${newline}${newline}// Gradle ${GRADLE_VERSION} and Kotlin ${KOTLIN_VERSION} share the JVM 25-capable API.${newline}` +
+    .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17)"\s*\}/g, '')
+    .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17)"/g, '');
+  if (!modern.includes('kotlinOptions.jvmTarget = "25"')) {
+    modern += `${newline}${newline}// AGP 9.3.1 exposes its embedded Kotlin 2.2 JvmTarget class to build scripts.${newline}` +
+      `// Avoid linking the Kotlin 2.4-only JVM_25 field while still passing target 25.${newline}` +
       `tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {${newline}` +
-      `    compilerOptions {${newline}` +
-      `        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)${newline}` +
-      `    }${newline}` +
+      `    @Suppress("DEPRECATION")${newline}` +
+      `    kotlinOptions.jvmTarget = "25"${newline}` +
       `}${newline}`;
   }
   fs.writeFileSync(appBuild, modern);
