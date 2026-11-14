@@ -74,6 +74,17 @@ if (fs.existsSync(rootBuild)) {
         `        )${newline}    }`,
     );
   }
+  if (!modern.includes(`kotlin-compiler-embeddable:${KOTLIN_VERSION}`)) {
+    modern += `${newline}${newline}// AGP supplies an older Kotlin runner; align the compiler artifacts used by each task.${newline}` +
+      `allprojects {${newline}    configurations.configureEach {${newline}` +
+      `        resolutionStrategy.force(${newline}` +
+      `            "org.jetbrains.kotlin:kotlin-compiler-embeddable:${KOTLIN_VERSION}",${newline}` +
+      `            "org.jetbrains.kotlin:kotlin-compiler-runner:${KOTLIN_VERSION}",${newline}` +
+      `            "org.jetbrains.kotlin:kotlin-daemon-embeddable:${KOTLIN_VERSION}",${newline}` +
+      `            "org.jetbrains.kotlin:kotlin-build-tools-api:${KOTLIN_VERSION}",${newline}` +
+      `            "org.jetbrains.kotlin:kotlin-build-tools-impl:${KOTLIN_VERSION}",${newline}` +
+      `        )${newline}    }${newline}}${newline}`;
+  }
   if (!modern.includes(`com.android.tools.build:gradle:${AGP_VERSION}`)) {
     throw new Error(`Could not update the generated Android Gradle plugin in ${rootBuild}`);
   }
