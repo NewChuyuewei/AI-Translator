@@ -84,13 +84,13 @@ class GeminiSessionClient : SessionClient {
             onMessage(webSocket, text)
         }
 
-        override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             socket.compareAndSet(webSocket, null)
             // Never expose response bodies, URLs, headers, or exception text: they may contain secrets.
             val message = when {
                 response != null -> "Gemini 连接被拒绝（HTTP ${response.code}）"
-                error is java.net.SocketTimeoutException -> "Gemini 连接超时"
-                error is javax.net.ssl.SSLException -> "TLS 证书验证失败"
+                t is java.net.SocketTimeoutException -> "Gemini 连接超时"
+                t is javax.net.ssl.SSLException -> "TLS 证书验证失败"
                 else -> "Gemini 网络连接失败"
             }
             mutableEvents.tryEmit(ClientEvent.Failed(message))
