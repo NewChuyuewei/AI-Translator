@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'translator-gradle-test-'));
 const properties = path.join(directory, 'gradle.properties');
+const rootBuild = path.join(directory, 'build.gradle.kts');
 const appBuild = path.join(directory, 'app', 'build.gradle.kts');
 const generatedDirectory = path.join(directory, 'app/src/main/java/com/gemini/live/translator/generated');
 const rustWebView = path.join(generatedDirectory, 'RustWebView.kt');
@@ -16,6 +17,7 @@ const wryActivity = path.join(generatedDirectory, 'WryActivity.kt');
 try {
   fs.mkdirSync(path.dirname(appBuild), { recursive: true });
   fs.mkdirSync(generatedDirectory, { recursive: true });
+  fs.writeFileSync(rootBuild, 'buildscript { dependencies { classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.10") } }\r\n');
   fs.writeFileSync(rustWebView, 'package com.gemini.live.translator.generated\r\n');
   fs.writeFileSync(wryActivity, 'package com.gemini.live.translator.generated\r\n');
   fs.writeFileSync(appBuild, [
@@ -27,7 +29,12 @@ try {
     '        sourceCompatibility = JavaVersion.VERSION_1_8',
     '        targetCompatibility = JavaVersion.VERSION_1_8',
     '    }',
-    '    kotlinOptions { jvmTarget = "1.8" }',
+    '}',
+    '',
+    'kotlin {',
+    '    compilerOptions {',
+    '        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8',
+    '    }',
     '}',
     '',
   ].join('\r\n'));
@@ -53,10 +60,12 @@ try {
   assert.match(configured, /^android\.newDsl=false$/m);
   assert.match(configured, /^android\.javaCompile\.suppressSourceTargetDeprecationWarning=true$/m);
   assert.match(configured, /^android\.sync\.suppressAgpWarnings=DEPRECATED_DSL,EXISTING_WARNING,JAVA_COMPILE_DEPRECATED_SOURCE_TARGET,UNSUPPORTED_PROJECT_OPTION_USE$/m);
+  assert.match(fs.readFileSync(rootBuild, 'utf8'), /kotlin-gradle-plugin:2\.4\.21/);
   const appScript = fs.readFileSync(appBuild, 'utf8');
   assert.doesNotMatch(appScript, /^android\s*\{/m);
   assert.match(appScript, /^extensions\.configure<com\.android\.build\.api\.dsl\.ApplicationExtension>\s*\{/m);
   assert.doesNotMatch(appScript, /JavaVersion\.VERSION_1_8|kotlinOptions/);
+  assert.doesNotMatch(appScript, /JavaVersion\.VERSION_(?:1_8|17)|JvmTarget\.JVM_(?:1_8|17)/);
   assert.equal((appScript.match(/JavaVersion\.VERSION_25/g) || []).length, 2);
   assert.match(appScript, /JvmTarget\.JVM_25/);
   assert.match(fs.readFileSync(rustWebView, 'utf8'), /^@file:Suppress\("DEPRECATION"\)\r?\n\r?\npackage /);

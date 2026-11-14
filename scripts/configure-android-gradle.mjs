@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const KOTLIN_VERSION = '2.4.21';
 const propertiesPath = process.argv[2] || 'src-tauri/gen/android/gradle.properties';
 const current = fs.readFileSync(propertiesPath, 'utf8');
 const newline = current.includes('\r\n') ? '\r\n' : '\n';
@@ -41,6 +42,19 @@ output.push(
 fs.writeFileSync(propertiesPath, output.join(newline));
 
 const androidRoot = path.dirname(path.resolve(propertiesPath));
+const rootBuild = path.join(androidRoot, 'build.gradle.kts');
+if (fs.existsSync(rootBuild)) {
+  const buildScript = fs.readFileSync(rootBuild, 'utf8');
+  const modern = buildScript.replace(
+    /org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+/,
+    `org.jetbrains.kotlin:kotlin-gradle-plugin:${KOTLIN_VERSION}`,
+  );
+  if (modern === buildScript && !buildScript.includes(`kotlin-gradle-plugin:${KOTLIN_VERSION}`)) {
+    throw new Error(`Could not update the generated Kotlin Gradle plugin in ${rootBuild}`);
+  }
+  fs.writeFileSync(rootBuild, modern);
+}
+
 const appBuild = path.join(androidRoot, 'app', 'build.gradle.kts');
 if (fs.existsSync(appBuild)) {
   const buildScript = fs.readFileSync(appBuild, 'utf8');
@@ -52,11 +66,12 @@ if (fs.existsSync(appBuild)) {
     throw new Error(`Could not find generated Android application DSL in ${appBuild}`);
   }
   modern = modern
-    .replaceAll('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_25')
-    .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17)"\s*\}/g, '')
-    .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17)"/g, '');
+    .replace(/JavaVersion\.VERSION_(?:1_8|17)/g, 'JavaVersion.VERSION_25')
+    .replace(/\n\s*kotlin\s*\{\s*compilerOptions\s*\{\s*jvmTarget\s*=\s*(?:org\.jetbrains\.kotlin\.gradle\.dsl\.)?JvmTarget\.JVM_(?:1_8|17)\s*\}\s*\}/g, '')
+    .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17|25)"\s*\}/g, '')
+    .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17|25)"/g, '');
   if (!modern.includes('JvmTarget.JVM_25')) {
-    modern += `${newline}${newline}// Project policy: compile generated application Kotlin to Java 25 bytecode.${newline}` +
+    modern += `${newline}${newline}// Kotlin ${KOTLIN_VERSION} and JDK 25 compile the generated app to Java 25 bytecode.${newline}` +
       `tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {${newline}` +
       `    compilerOptions {${newline}` +
       `        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)${newline}` +

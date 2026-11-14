@@ -9,7 +9,7 @@
 - 增加 `gemini-3.5-live-translate-preview`：每个会话固定**一个目标语言**，原文及译文字幕，可选择播放译音；不是双向翻译。当前 `echoTargetLanguage=false`：输入已是目标语言时不会复述。
 - 增加 `gemini-3.5-transcribe-live`：用户明确选择**只实时转写原文，不做翻译，也不播放译音**；不得私自串接收费的二次翻译服务。目标语言、双向和译音控制在该模式不可用。默认 VERBATIM；可选 SMART，它只整理原文，可能删除口头语或修改格式。
 - 控制台、桌面字幕窗、Android 悬浮窗和前台通知应真实区分「翻译」与「转写」，不能在转写模式显示等待译文或启动播放器。
-- 稳定技术栈已于 2026-11-14 审计：Vite 8.3.8、jsdom 31.0.1、Tauri Rust 2.12.5／JS 2.12.4、Node 22.22.2+ 或 24.15.0+、Android Java/Kotlin target 25；精确版本和因风险暂缓的升级见 `docs/TECH_STACK.md`。
+- 稳定技术栈已于 2026-11-14 审计：Vite 8.3.8、jsdom 31.0.1、Tauri Rust 2.12.5／JS 2.12.4、Node 22.22.2+ 或 24.15.0+、Android 构建 JDK 25、Kotlin Gradle Plugin 2.4.21、Java/Kotlin target 25；精确版本和因风险暂缓的升级见 `docs/TECH_STACK.md`。
 - 当前源码版本 **0.2.0**；历史 0.1.3 的 APK / Windows 包**没有** 3.5 功能，不能冒充新版交付。0.2.0 尚未生成或验证安装包。
 
 ## 2. 最重要的未解决问题：Android 启动闪退
