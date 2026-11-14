@@ -33,6 +33,7 @@ percent-encoding = "2.3.2"
 # CPAL 0.16+ is a breaking backend migration across all desktop targets; defer until physical-device CI is available.
 cpal = "0.15.3"
 crossbeam-channel = "0.5.17"
+zeroize = "1.9.1"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Desktop OS proxy settings, bypass rules and PAC/WPAD resolution.

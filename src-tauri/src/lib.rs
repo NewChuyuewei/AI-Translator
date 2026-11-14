@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::{Read, Write}, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
+use zeroize::Zeroize;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +43,12 @@ struct StartOptions {
 fn default_other() -> String { "en".into() }
 fn default_overlay_scale() -> f64 { 1.0 }
 fn default_token_saver() -> bool { true }
+impl Drop for StartOptions {
+    fn drop(&mut self) {
+        self.api_key.zeroize();
+        self.proxy_url.zeroize();
+    }
+}
 impl StartOptions {
     fn gemini(&self) -> GeminiOptions { GeminiOptions { api_key: self.api_key.clone(), model: self.model, thinking_level: self.thinking_level, transcription_mode: self.transcription_mode, target_language: self.target_language.clone(), bidirectional: self.bidirectional, other_language: self.other_language.clone() } }
     #[cfg(not(target_os = "android"))]
@@ -84,6 +91,12 @@ struct PersistedSettings {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SecretPayload { api_key: String, proxy_url: String }
+impl Drop for SecretPayload {
+    fn drop(&mut self) {
+        self.api_key.zeroize();
+        self.proxy_url.zeroize();
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,13 +150,29 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).context("无法限制配置文件权限")?;
     }
-    if let Err(first) = fs::rename(&temporary, path) {
-        if path.exists() {
-            fs::remove_file(path).context("无法替换旧的应用配置")?;
-            fs::rename(&temporary, path).context("无法保存新的应用配置")?;
-        } else {
-            return Err(first).context("无法保存应用配置");
+    #[cfg(not(windows))]
+    fs::rename(&temporary, path).context("无法原子保存应用配置")?;
+    #[cfg(windows)]
+    {
+        // Windows rename does not replace an existing destination. Keep a
+        // recoverable backup until the new file is in place; deleting the old
+        // file first could lose all settings after a power or disk failure.
+        let backup = path.with_extension("bak");
+        if backup.exists() { fs::remove_file(&backup).context("无法清理旧配置备份")?; }
+        let had_previous = path.exists();
+        if had_previous { fs::rename(path, &backup).context("无法备份旧应用配置")?; }
+        if let Err(error) = fs::rename(&temporary, path) {
+            if had_previous { let _ = fs::rename(&backup, path); }
+            return Err(error).context("无法保存新的应用配置");
         }
+        if had_previous { fs::remove_file(&backup).context("无法清理应用配置备份")?; }
+    }
+    #[cfg(unix)]
+    {
+        // Persist the directory entry as well as file contents so an abrupt
+        // shutdown cannot leave a zero-length or missing configuration.
+        fs::File::open(parent).and_then(|directory| directory.sync_all())
+            .context("无法同步应用配置目录")?;
     }
     Ok(())
 }
@@ -678,10 +707,15 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
                 trace.error("音频设备报告错误；请查看界面状态提示");
                 break Err(anyhow!(error));
             },
-            Some(frame) = pcm_rx.recv() => {
+            Some(mut frame) = pcm_rx.recv() => {
+                // The WebSocket message owns its encoded copy. Erase the raw
+                // PCM before waiting on network I/O so voice data has the
+                // shortest practical lifetime in process memory.
+                let message = gemini_client::audio_frame(&frame);
+                frame.zeroize();
                 let sent = tokio::select! {
                     _ = gemini_client::cancelled(cancel) => break Ok(()),
-                    result = tokio::time::timeout(std::time::Duration::from_secs(8), sink.send(gemini_client::audio_frame(&frame))) => result,
+                    result = tokio::time::timeout(std::time::Duration::from_secs(8), sink.send(message)) => result,
                 };
                 match sent {
                     Ok(Ok(())) => if !sent_audio { trace.info("已发送首个音频帧（内容未记录）"); sent_audio = true; },

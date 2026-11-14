@@ -5,6 +5,7 @@ use crossbeam_channel::{bounded, Sender};
 use std::{collections::VecDeque, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}, thread, time::Duration};
 use tokio::sync::mpsc;
 use crate::audio_router::Resampler;
+use zeroize::Zeroize;
 
 enum Command { Audio { epoch: u64, bytes: Vec<u8> }, Stop }
 pub struct AudioPlayer {
@@ -56,13 +57,15 @@ impl AudioPlayer {
             while let Ok(command) = rx.recv() {
                 match command {
                     Command::Stop => break,
-                    Command::Audio { epoch, bytes } => {
+                    Command::Audio { epoch, mut bytes } => {
                         // An interruption invalidates even chunks still queued
                         // ahead of the playback worker, without waiting for it.
-                        if epoch != worker_epoch.load(Ordering::Acquire) { continue; }
+                        if epoch != worker_epoch.load(Ordering::Acquire) { bytes.zeroize(); continue; }
                         if resampler_epoch != epoch { resampler = Resampler::new(24_000, rate); resampler_epoch = epoch; }
-                        let input: Vec<f32> = bytes.chunks_exact(2).map(|x| i16::from_le_bytes([x[0],x[1]]) as f32 / 32768.0).collect();
+                        let mut input: Vec<f32> = bytes.chunks_exact(2).map(|x| i16::from_le_bytes([x[0],x[1]]) as f32 / 32768.0).collect();
+                        bytes.zeroize();
                         let output = resampler.push(&input);
+                        input.zeroize();
                         if let Ok(mut q) = queue.lock() {
                             if epoch != worker_epoch.load(Ordering::Acquire) { continue; }
                             q.extend(output);
@@ -89,6 +92,9 @@ impl AudioPlayer {
 }
 impl Drop for AudioPlayer {
     fn drop(&mut self) {
+        // Invalidate queued audio before waiting for the worker. It will wipe
+        // stale chunks rather than playing them while a session is stopping.
+        self.clear();
         let _ = self.tx.send(Command::Stop);
         if let Some(h) = self.thread.take() { let _ = h.join(); }
     }
