@@ -1,4 +1,4 @@
-Gemini Live Translator 0.1.5 · Windows 64 位免安装版
+Gemini Live Translator 0.1.6 · Windows 64 位免安装版
 
 1. 将压缩包中的所有文件解压到同一文件夹，不要仅取出 .exe。
 2. 双击 Gemini-Live-Translator.exe。若压缩包内含 WebView2Loader.dll，请务必将它与 EXE 保持在同一文件夹。

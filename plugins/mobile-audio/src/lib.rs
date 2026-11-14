@@ -68,7 +68,7 @@ mod native {
     use jni::{objects::{JClass, JShortArray, JString}, sys::{jint, jboolean}, JNIEnv};
     #[no_mangle]
     pub extern "system" fn Java_com_gemini_livetranslator_audio_NativeAudioBridge_pushAudio(
-        mut env: JNIEnv, _class: JClass, system: jboolean, data: JShortArray, length: jint, sample_rate: jint,
+        env: JNIEnv, _class: JClass, system: jboolean, data: JShortArray, length: jint, sample_rate: jint,
     ) {
         if length <= 0 || length > 32_000 || sample_rate <= 0 { return; }
         if let Ok(actual) = env.get_array_length(&data) {
