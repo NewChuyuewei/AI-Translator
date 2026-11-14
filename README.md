@@ -43,7 +43,7 @@
 |:---:|---|:---:|:---:|---|
 | **Windows 10/11** | Tauri 2 · Rust · WebView2 | ✅ | ✅ WASAPI loopback | 需要 Windows 真机验证、签名与安装升级测试 |
 | **macOS 13+** | Tauri 2 · Rust · ScreenCaptureKit | ✅ | ✅ | 需要麦克风和屏幕录制权限；待 Mac 真机与公证验证 |
-| **Android 8+** | Kotlin · JDK 25 · Jetpack Compose | ✅ | 🚧 | 原生重写进行中；MediaProjection 与悬浮字幕仍待完成 |
+| **Android 8+** | Kotlin · JDK 25 · Jetpack Compose | ✅ | ✅ Android 10+ | 可选择麦克风、手机内声音或混合输入；悬浮字幕和真机验证仍待完成 |
 | **Linux** | Tauri 2 · Rust · ALSA | ✅ | ❌ | 仅作为开发与 CI 辅助平台 |
 
 > [!NOTE]

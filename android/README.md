@@ -10,15 +10,15 @@ Implemented in the native module:
 - screenshot protection for API keys and transcripts;
 - Android Keystore-backed AES-256-GCM API-key storage;
 - bounded Gemini WebSocket messages, redacted transport failures, explicit setup-complete state gating, and a 25-second initialization timeout;
-- native `AudioRecord` microphone capture using 40 ms PCM16 frames and silence suppression with a one-second VAD hangover;
-- bounded 240 ms audio queues and bounded WebSocket send backlog;
+- native `AudioRecord` microphone capture and Android 10+ `AudioPlaybackCapture` for device media/game audio;
+- selectable microphone-only, device-audio-only, or bounded real-time mixed input using 40 ms PCM16 frames;
+- silence suppression with a one-second VAD hangover, bounded 240 ms audio queues, and bounded WebSocket send backlog;
 - lifecycle-independent foreground service with notification stop control;
 - bounded native `AudioTrack` playback for translated 24 kHz PCM;
 - JVM-target and configuration validation tests.
 
 Remaining production work:
 
-- MediaProjection system-audio capture;
 - Compose system overlay;
 - proxy selection and 20k-token/minute budget enforcement;
 - emulator and physical-device validation, including Android 15+.

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.gemini.live.translator.data.AudioSourceMode
 import com.gemini.live.translator.data.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,6 @@ class SessionForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        showForeground("正在准备实时翻译…")
         scope.launch {
             runtime.session.collect { state ->
                 val text = when (state) {
@@ -48,7 +48,10 @@ class SessionForegroundService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        showForeground("正在准备实时翻译…")
+        val mode = intent?.getStringExtra(EXTRA_AUDIO_SOURCE)
+            ?.let { runCatching { AudioSourceMode.valueOf(it) }.getOrNull() }
+            ?: AudioSourceMode.MICROPHONE
+        showForeground("正在准备实时翻译…", mode)
         return START_NOT_STICKY
     }
 
@@ -59,9 +62,12 @@ class SessionForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun showForeground(text: String) {
+    private fun showForeground(text: String, mode: AudioSourceMode) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification(text), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            var types = 0
+            if (mode.usesMicrophone) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (mode.usesDeviceAudio) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            startForeground(NOTIFICATION_ID, notification(text), types)
         } else {
             startForeground(NOTIFICATION_ID, notification(text))
         }
@@ -106,9 +112,12 @@ class SessionForegroundService : Service() {
         private const val CHANNEL_ID = "live_session"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.gemini.live.translator.STOP"
+        private const val EXTRA_AUDIO_SOURCE = "audio_source"
 
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, SessionForegroundService::class.java))
+        fun start(context: Context, mode: AudioSourceMode) {
+            val intent = Intent(context, SessionForegroundService::class.java)
+                .putExtra(EXTRA_AUDIO_SOURCE, mode.name)
+            ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: Context) {
