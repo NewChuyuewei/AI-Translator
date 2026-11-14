@@ -34,8 +34,10 @@ struct StartOptions {
     #[serde(default)] playback_device: Option<String>,
     #[serde(default)] proxy_mode: ProxyMode,
     #[serde(default)] proxy_url: String,
+    #[serde(default = "default_overlay_scale")] overlay_scale: f64,
 }
 fn default_other() -> String { "en".into() }
+fn default_overlay_scale() -> f64 { 1.0 }
 impl StartOptions {
     fn gemini(&self) -> GeminiOptions { GeminiOptions { api_key: self.api_key.clone(), model: self.model, thinking_level: self.thinking_level, transcription_mode: self.transcription_mode, target_language: self.target_language.clone(), bidirectional: self.bidirectional, other_language: self.other_language.clone() } }
     fn audio(&self) -> AudioConfig { AudioConfig { mode: self.mode, microphone_device: self.microphone_device.clone(), system_device: self.system_device.clone() } }
@@ -155,6 +157,7 @@ fn read_settings(app: &AppHandle) -> Result<Option<PersistedSettings>> {
     // Defense in depth for hand-edited files.
     settings.options.api_key.clear();
     settings.options.proxy_url.clear();
+    settings.options.overlay_scale = checked_overlay_scale(settings.options.overlay_scale).unwrap_or(1.0);
     Ok(Some(settings))
 }
 
@@ -229,9 +232,9 @@ fn read_encrypted_secrets(app: &AppHandle, password: &str) -> Result<SecretPaylo
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Status { phase: String, message: String, shortcut_available: bool, overlay_locked: bool, platform: String, network_route: String, transcription_only: bool }
+struct Status { phase: String, message: String, shortcut_available: bool, overlay_locked: bool, platform: String, network_route: String, transcription_only: bool, overlay_scale: f64 }
 impl Default for Status {
-    fn default() -> Self { Self { phase:"idle".into(), message:"准备就绪".into(), shortcut_available:false, overlay_locked:true, platform: std::env::consts::OS.into(), network_route:"尚未检测".into(), transcription_only:false } }
+    fn default() -> Self { Self { phase:"idle".into(), message:"准备就绪".into(), shortcut_available:false, overlay_locked:true, platform: std::env::consts::OS.into(), network_route:"尚未检测".into(), transcription_only:false, overlay_scale:1.0 } }
 }
 struct Inner { status: Status, last: Option<StartOptions>, cancel: Option<watch::Sender<bool>>, generation: u64 }
 struct Controller(Mutex<Inner>);
@@ -244,6 +247,21 @@ impl Default for Controller {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Subtitle { original: String, translated: String, transcription_only: bool }
+fn checked_overlay_scale(scale: f64) -> Result<f64> {
+    if !scale.is_finite() || !(0.8..=1.6).contains(&scale) {
+        return Err(anyhow!("字幕缩放比例必须在 80% 到 160% 之间"));
+    }
+    Ok((scale * 10.0).round() / 10.0)
+}
+fn resize_overlay(app: &AppHandle, scale: f64) -> Result<()> {
+    #[cfg(not(any(target_os="android", target_os="ios")))]
+    if let Some(window) = app.get_webview_window("main") {
+        window.set_size(tauri::LogicalSize::new(760.0 * scale, 138.0 * scale)).context("无法调整字幕窗口大小")?;
+    }
+    #[cfg(any(target_os="android", target_os="ios"))]
+    let _ = (app, scale);
+    Ok(())
+}
 fn publish(app: &AppHandle, status: &Status) { let _ = app.emit("session-status", status.clone()); }
 fn set_phase(app: &AppHandle, generation: u64, phase: &str, message: &str) {
     let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap();
@@ -345,17 +363,23 @@ fn get_saved_settings(app: AppHandle, state: tauri::State<'_, Controller>) -> Re
     let saved = read_settings(&app).map_err(|e| format!("{e:#}"))?;
     if let Some(settings) = &saved {
         let transcription_only = settings.options.model.is_transcription_only();
+        let overlay_scale = settings.options.overlay_scale;
         let mut inner = state.0.lock().unwrap();
         inner.last = Some(settings.options.clone());
-        let changed = inner.cancel.is_none()
+        let mode_changed = inner.cancel.is_none()
             && matches!(inner.status.phase.as_str(), "idle" | "error")
             && inner.status.transcription_only != transcription_only;
-        if changed { inner.status.transcription_only = transcription_only; }
-        let status = if changed { Some(inner.status.clone()) } else { None };
+        let scale_changed = (inner.status.overlay_scale - overlay_scale).abs() > f64::EPSILON;
+        if mode_changed { inner.status.transcription_only = transcription_only; }
+        if scale_changed { inner.status.overlay_scale = overlay_scale; }
+        let status = if mode_changed || scale_changed { Some(inner.status.clone()) } else { None };
         drop(inner);
+        resize_overlay(&app, overlay_scale).map_err(|e| format!("{e:#}"))?;
         if let Some(status) = status {
             publish(&app, &status);
-            let _ = app.emit("subtitle-update", Subtitle { original: String::new(), translated: String::new(), transcription_only });
+            if mode_changed {
+                let _ = app.emit("subtitle-update", Subtitle { original: String::new(), translated: String::new(), transcription_only });
+            }
         }
     }
     Ok(saved)
@@ -375,6 +399,7 @@ fn unlock_saved_secrets(app: AppHandle, state: tauri::State<'_, Controller>, pas
 // preferences. Sensitive fields only enter the password-encrypted vault.
 #[tauri::command]
 fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, mut options: StartOptions, save_sensitive: bool, encryption_password: String) -> Result<(), String> {
+    options.overlay_scale = checked_overlay_scale(options.overlay_scale).map_err(|e| e.to_string())?;
     if save_sensitive {
         let vault_exists = config_path(&app, SECRETS_FILE).map_err(|e| format!("{e:#}"))?.exists();
         if encryption_password.is_empty() {
@@ -413,6 +438,18 @@ fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, mut op
 }
 #[tauri::command] fn stop_translation(app: AppHandle) { stop_session(&app); }
 #[tauri::command] fn toggle_translation(app: AppHandle) { toggle_session(&app); }
+#[tauri::command]
+fn set_overlay_scale(app: AppHandle, state: tauri::State<'_, Controller>, scale: f64) -> Result<(), String> {
+    let scale = checked_overlay_scale(scale).map_err(|e| e.to_string())?;
+    resize_overlay(&app, scale).map_err(|e| format!("{e:#}"))?;
+    let mut inner = state.0.lock().unwrap();
+    inner.status.overlay_scale = scale;
+    if let Some(options) = &mut inner.last { options.overlay_scale = scale; }
+    let status = inner.status.clone();
+    drop(inner);
+    publish(&app, &status);
+    Ok(())
+}
 #[tauri::command]
 async fn set_overlay_locked(app: AppHandle, locked: bool) -> Result<(), String> {
     #[cfg(not(target_os="android"))]
@@ -682,7 +719,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
 pub fn run() {
     let mut builder = tauri::Builder::default().manage(Controller::default()).manage(LogStore::default());
     #[cfg(target_os="android")] { builder = builder.plugin(tauri_plugin_mobile_audio::init()); }
-    builder = builder.invoke_handler(tauri::generate_handler![list_audio_devices,get_status,get_saved_settings,unlock_saved_secrets,get_diagnostics,clear_diagnostics,copy_diagnostic_text,start_translation,remember_settings,stop_translation,toggle_translation,set_overlay_locked,request_overlay_permission,quit_app]);
+    builder = builder.invoke_handler(tauri::generate_handler![list_audio_devices,get_status,get_saved_settings,unlock_saved_secrets,get_diagnostics,clear_diagnostics,copy_diagnostic_text,start_translation,remember_settings,stop_translation,toggle_translation,set_overlay_scale,set_overlay_locked,request_overlay_permission,quit_app]);
     #[cfg(not(any(target_os="android", target_os="ios")))]
     {
         // The click-through overlay has no taskbar entry or tray. Closing the
@@ -715,7 +752,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_fragment, decrypt_secrets, encrypt_secrets, replace_transcript, settings_for_storage, SecretPayload, StartOptions};
+    use super::{add_fragment, checked_overlay_scale, decrypt_secrets, encrypt_secrets, replace_transcript, settings_for_storage, SecretPayload, StartOptions};
 
     #[test]
     fn subtitle_fragments_handle_deltas_hypotheses_and_reset() {
@@ -787,6 +824,15 @@ mod tests {
         assert_eq!(decrypted.proxy_url, payload.proxy_url);
         assert!(decrypt_secrets("wrong password", &encrypted).is_err());
         assert!(encrypt_secrets("short", &payload).is_err());
+    }
+
+    #[test]
+    fn overlay_scale_is_bounded_and_normalized() {
+        assert_eq!(checked_overlay_scale(1.26).unwrap(), 1.3);
+        assert_eq!(checked_overlay_scale(0.8).unwrap(), 0.8);
+        assert_eq!(checked_overlay_scale(1.6).unwrap(), 1.6);
+        assert!(checked_overlay_scale(0.79).is_err());
+        assert!(checked_overlay_scale(f64::NAN).is_err());
     }
 
     #[test]

@@ -15,7 +15,7 @@ Tauri 2 + Rust 的实时语音翻译与转写**开发原型**：支持麦克风�
    - **Gemini 3.5 Transcribe Live**：只将语音识别成原文，不翻译也不输出译音；自动检测语言，可选默认逐字转写（VERBATIM）或智能整理（SMART，仍为原文，可能删除口头语并修改格式）。会话最长 10 分钟，到期需手动重新开始。
    选择麦克风、系统音频或混合音源；翻译模型如需播放译音，打开「播放翻译语音」。
 3. 点击「开始翻译」或「开始转写」。Android 需按系统提示授权麦克风，使用系统音频时还需**每次会话**同意 MediaProjection。
-4. 桌面端字幕窗默认系统级鼠标穿透：在控制面板点「解锁字幕窗以拖动」，拖动窗口上方把手，再点「锁定并穿透」。完全穿透时把手也无法接收鼠标，这是操作系统窗口机制的限制。
+4. 桌面端字幕窗默认系统级鼠标穿透：在控制面板点「解锁字幕窗以拖动」，拖动窗口上方把手，再点「锁定并穿透」。完全穿透时把手也无法接收鼠标，这是操作系统窗口机制的限制。控制面板的「字幕窗缩放」可在 80%–160% 间同步调整窗口和字幕字号；该偏好会自动保存。持续增长的字幕会自动滚动到最新内容。
 5. Android 若要在其他应用上方显示字幕，先点「授权系统悬浮窗」并在系统设置中允许；启动后可解锁、拖动、重新锁定。悬浮窗不是锁屏显示的保证。
 6. 桌面端 **F8** 或面板按钮停止；再次开始会建立**新的会话**。F8 的“暂停”是停止采集和连接，不保留原会话或恢复上下文。更改音源、设备、语言或模型会停止并重新连接；Android 系统内录可能再次请求授权。桌面关闭控制面板会退出应用。
 
@@ -167,7 +167,7 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 ### GitHub Actions 自动构建与发布
 
 - `.github/workflows/ci.yml`：推送到 `main`／`arena/**`、Pull Request 或手动触发时，执行前端构建、JSDOM 测试和锁定依赖的 Rust 单元测试。
-- `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK；全部成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
+- `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK；全部成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
 
 发布前应先同步 `package.json`、Cargo、Tauri 和安装脚本版本，再创建同版本标签，例如 `git tag v0.1.5 && git push origin v0.1.5`。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
 

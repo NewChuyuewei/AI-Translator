@@ -60,7 +60,7 @@
     <section class="card preview-card">
       <div class="section-heading"><div class="step">03</div><div><h2>实时字幕</h2><p id="preview-hint">原文与译文将显示在悬浮窗</p></div><span class="live-indicator"><i></i> LIVE PREVIEW</span></div>
       <div class="subtitle-preview"><div class="preview-label">ORIGINAL</div><p id="preview-original">等待语音输入…</p><div id="preview-translated-label" class="preview-label translation-label">TRANSLATION</div><p id="preview-translated">翻译结果将在这里显示。</p><div class="preview-sparkle">✳</div></div>
-      <div class="overlay-actions"><button type="button" id="overlay-lock" class="ghost-button">解锁字幕窗以拖动</button><button type="button" id="overlay-permission" class="ghost-button hidden">授权系统悬浮窗</button><span class="overlay-hint" id="overlay-hint">默认鼠标穿透</span></div>
+      <div class="overlay-actions"><button type="button" id="overlay-lock" class="ghost-button">解锁字幕窗以拖动</button><button type="button" id="overlay-permission" class="ghost-button hidden">授权系统悬浮窗</button><label class="overlay-scale-control" for="overlay-scale"><span>字幕窗缩放</span><input id="overlay-scale" type="range" min="80" max="160" step="10" value="100"><output id="overlay-scale-value" for="overlay-scale">100%</output></label><span class="overlay-hint" id="overlay-hint">默认鼠标穿透</span></div>
     </section>
 
     <footer class="footer"><div class="session-detail"><span id="footer-dot" class="footer-dot"></span><span id="status-message">准备就绪</span></div><button id="start-stop" class="primary" type="button"><span id="button-icon">▶</span><span id="button-text">开始翻译</span></button></footer>
