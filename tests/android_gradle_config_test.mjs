@@ -85,9 +85,9 @@ try {
   const appScript = fs.readFileSync(appBuild, 'utf8');
   assert.doesNotMatch(appScript, /^android\s*\{/m);
   assert.match(appScript, /^extensions\.configure<com\.android\.build\.api\.dsl\.ApplicationExtension>\s*\{/m);
-  assert.doesNotMatch(appScript, /JavaVersion\.VERSION_(?:1_8|17)|JvmTarget\.JVM_(?:1_8|17)|kotlinOptions/);
+  assert.doesNotMatch(appScript, /JavaVersion\.VERSION_(?:1_8|17)|JvmTarget\.JVM_|kotlinOptions/);
   assert.equal((appScript.match(/JavaVersion\.VERSION_25/g) || []).length, 2);
-  assert.match(appScript, /JvmTarget\.JVM_25/);
+  assert.match(appScript, /freeCompilerArgs\.addAll\("-jvm-target", "25"\)/);
   assert.match(fs.readFileSync(rustWebView, 'utf8'), /^@file:Suppress\("DEPRECATION"\)\r?\n\r?\npackage /);
   assert.match(fs.readFileSync(wryActivity, 'utf8'), /^@file:Suppress\("DEPRECATION"\)\r?\n\r?\npackage /);
 

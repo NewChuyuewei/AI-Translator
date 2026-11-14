@@ -104,11 +104,11 @@ if (fs.existsSync(appBuild)) {
     .replace(/\n\s*kotlin\s*\{\s*compilerOptions\s*\{\s*jvmTarget\s*=\s*(?:org\.jetbrains\.kotlin\.gradle\.dsl\.)?JvmTarget\.JVM_(?:1_8|17)\s*\}\s*\}/g, '')
     .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17)"\s*\}/g, '')
     .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17)"/g, '');
-  if (!modern.includes('JvmTarget.JVM_25')) {
-    modern += `${newline}${newline}// Stable AGP ${AGP_VERSION}, Gradle ${GRADLE_VERSION}, and Kotlin ${KOTLIN_VERSION} share the JVM 25 API.${newline}` +
+  if (!modern.includes('freeCompilerArgs.addAll("-jvm-target", "25")')) {
+    modern += `${newline}${newline}// Avoid AGP's stale JvmTarget enum while passing target 25 to Kotlin ${KOTLIN_VERSION}.${newline}` +
       `tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {${newline}` +
       `    compilerOptions {${newline}` +
-      `        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)${newline}` +
+      `        freeCompilerArgs.addAll("-jvm-target", "25")${newline}` +
       `    }${newline}` +
       `}${newline}`;
   }
