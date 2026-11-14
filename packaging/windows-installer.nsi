@@ -16,7 +16,7 @@ RequestExecutionLevel user
 !endif
 
 !define PRODUCT_NAME "Gemini Live Translator"
-!define PRODUCT_VERSION "0.1.4"
+!define PRODUCT_VERSION "0.1.5"
 !define APP_EXE "Gemini-Live-Translator.exe"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\GeminiLiveTranslator"
 

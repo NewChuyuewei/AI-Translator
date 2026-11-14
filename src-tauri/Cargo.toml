@@ -1,6 +1,6 @@
 [package]
 name = "gemini-live-translator"
-version = "0.1.4"
+version = "0.1.5"
 description = "Gemini Live real-time voice translation"
 authors = ["Gemini Live Translator contributors"]
 edition = "2021"
@@ -25,6 +25,7 @@ rustls = { version = "0.23", default-features = false, features = ["std", "ring"
 futures-util = "0.3"
 anyhow = "1"
 base64 = "0.22"
+ring = "0.17"
 url = "2"
 percent-encoding = "2"
 cpal = "0.15.3"

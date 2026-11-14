@@ -1,0 +1,156 @@
+name: Build and release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag, for example v0.1.5
+        required: true
+        type: string
+      prerelease:
+        description: Mark the GitHub release as a prerelease
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            label: Windows x64
+            bundles: nsis
+            artifact: windows-x64
+          - os: macos-14
+            label: macOS Apple Silicon
+            bundles: dmg
+            artifact: macos-arm64
+          - os: ubuntu-24.04
+            label: Linux x64
+            bundles: deb,appimage
+            artifact: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev pkg-config
+      - run: npm ci
+      - run: npm run test:ui
+      - name: Build native bundles
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Stage native bundles
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find src-tauri/target/release/bundle -type f \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) \
+            -exec cp '{}' release-assets/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android ARM64 debug APK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Android SDK and NDK
+        run: sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;36.0.0" "build-tools;37.0.0" "ndk;28.2.13676358"
+      - run: npm ci
+      - name: Initialize generated Android project
+        run: npx tauri android init --ci
+      - name: Build ARM64 debug APK
+        run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npx tauri android build --debug --apk --target aarch64 --ci
+      - name: Stage APK
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          VERSION="${RELEASE_TAG#v}"
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk \
+            "release-assets/Gemini-Live-Translator-${VERSION}-arm64-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-debug
+          path: release-assets/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub release
+    needs: [desktop, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag matches package version
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Tag ${RELEASE_TAG} does not match v${VERSION}"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create checksums
+        run: |
+          cd release-assets
+          find . -maxdepth 1 -type f -printf '%f\n' | sort
+          sha256sum * > SHA256SUMS.txt
+      - name: Create or update release
+        shell: bash
+        run: |
+          flags=(--title "Gemini Live Translator ${RELEASE_TAG}" --generate-notes --target "${GITHUB_SHA}")
+          if [[ "${PRERELEASE}" == "true" ]]; then flags+=(--prerelease); fi
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" release-assets/* "${flags[@]}"
+          fi

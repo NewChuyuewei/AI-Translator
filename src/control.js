@@ -6,6 +6,7 @@ const isTauri = !!window.__TAURI_INTERNALS__;
 let status = { phase: 'idle', message: '准备就绪', platform: 'preview', shortcutAvailable: false, overlayLocked: true, networkRoute: '尚未检测', transcriptionOnly: false };
 let reconfigureTimer, rememberTimer, reconfiguring = false, noticeTimer;
 let previewTranscriptionOnly = null, devicePlatform = null;
+let vaultUnlocked = false, hasSavedVault = false, secretsDirty = false, secretEditSeq = 0;
 const waiting = [];
 const diagnosticEntries = new Map();
 let diagnosticClearSeq = 0;
@@ -120,11 +121,53 @@ function waitForStopped() {
     waiting.push(done);
   });
 }
-// The desktop F8 shortcut uses the most recently edited options, without writing them to disk.
+// Keep F8 synchronized and persist preferences. Secrets are removed by the
+// native backend unless the user explicitly opts in on this device.
 function rememberOptions() {
   if (!isTauri) return;
   clearTimeout(rememberTimer);
-  rememberTimer = setTimeout(() => invoke('remember_settings', { options: collectOptions() }).catch(toast), 180);
+  if ($('save-sensitive').checked && !hasSavedVault && !vaultUnlocked) return;
+  const editSeq = secretEditSeq;
+  rememberTimer = setTimeout(() => {
+    const encryptChanges = vaultUnlocked && secretsDirty;
+    invoke('remember_settings', {
+      options: collectOptions(), saveSensitive: $('save-sensitive').checked,
+      encryptionPassword: encryptChanges ? $('encryption-password').value : '',
+    }).then(() => { if (encryptChanges && secretEditSeq === editSeq) secretsDirty = false; }).catch(toast);
+  }, 180);
+}
+function updateVaultUi() {
+  const enabled = $('save-sensitive').checked;
+  $('vault-controls').classList.toggle('hidden', !enabled);
+  $('vault-status').textContent = vaultUnlocked ? '已解锁 · 修改后会重新加密保存'
+    : hasSavedVault ? '已加密保存 · 输入密码以解锁' : '设置至少 8 个字符的密码';
+  $('unlock-vault').textContent = hasSavedVault && !vaultUnlocked ? '解锁' : '保存加密配置';
+}
+function setSelectValue(id, value) {
+  const select = $(id);
+  if (value != null && [...select.options].some(option => option.value === value)) select.value = value;
+}
+function applySavedSettings(saved) {
+  if (!saved?.options) return;
+  const options = saved.options;
+  $('save-sensitive').checked = !!saved.saveSensitive;
+  hasSavedVault = !!saved.saveSensitive;
+  vaultUnlocked = false; secretsDirty = false;
+  $('encryption-password').value = '';
+  $('api-key').value = options.apiKey || '';
+  for (const [id, value] of [
+    ['model', options.model], ['thinking-level', options.thinkingLevel],
+    ['transcription-mode', options.transcriptionMode], ['target', options.targetLanguage],
+    ['other-language', options.otherLanguage], ['microphone-device', options.microphoneDevice || ''],
+    ['system-device', options.systemDevice || ''], ['playback-device', options.playbackDevice || ''],
+    ['proxy-mode', options.proxyMode],
+  ]) setSelectValue(id, value);
+  $('bidirectional').checked = !!options.bidirectional;
+  $('playback-enabled').checked = !!options.playbackEnabled;
+  $('proxy-url').value = options.proxyUrl || '';
+  const mode = [...document.querySelectorAll('input[name=mode]')].find(input => input.value === options.mode);
+  if (mode) mode.checked = true;
+  updateVaultUi(); updateProxy(); updateModel();
 }
 async function start() {
   if (!isTauri) { toast('这是浏览器界面预览。请在 Tauri 桌面或 Android 应用中运行。'); return; }
@@ -230,13 +273,58 @@ $('quit').addEventListener('click', () => isTauri ? invoke('quit_app') : toast('
 for (const id of ['model','thinking-level','transcription-mode','target','bidirectional','other-language','microphone-device','system-device','playback-enabled','playback-device']) {
   $(id).addEventListener('change', () => { updateModel(); rememberOptions(); scheduleReconfigure(); });
 }
-$('api-key').addEventListener('input', rememberOptions);
+$('api-key').addEventListener('input', () => {
+  secretsDirty = true; secretEditSeq += 1;
+  if ($('save-sensitive').checked && !vaultUnlocked) toast('请先解锁加密保险库，或关闭加密保存。');
+  rememberOptions();
+});
 $('api-key').addEventListener('change', scheduleReconfigure);
+$('save-sensitive').addEventListener('change', () => {
+  if ($('save-sensitive').checked) {
+    vaultUnlocked = false;
+    updateVaultUi();
+    $('encryption-password').focus();
+    toast('请设置加密密码，然后点击“保存加密配置”。');
+  } else {
+    vaultUnlocked = false; hasSavedVault = false; secretsDirty = false;
+    $('encryption-password').value = '';
+    updateVaultUi(); rememberOptions();
+    toast('已关闭加密保存；本地加密副本将被清除。');
+  }
+});
+$('unlock-vault').addEventListener('click', async () => {
+  const password = $('encryption-password').value;
+  if (password.length < 8) { $('encryption-password').focus(); toast('加密密码至少需要 8 个字符'); return; }
+  $('unlock-vault').disabled = true;
+  try {
+    if (hasSavedVault && !vaultUnlocked) {
+      const secrets = await invoke('unlock_saved_secrets', { password });
+      $('api-key').value = secrets.apiKey || '';
+      $('proxy-url').value = secrets.proxyUrl || '';
+      updateProxy();
+      vaultUnlocked = true; secretsDirty = false;
+      toast('加密配置已解锁，仅在本次运行内保持解锁。');
+    } else {
+      const options = collectOptions();
+      if (!options.apiKey) { $('api-key').focus(); throw new Error('请先填写 API Key'); }
+      await invoke('remember_settings', { options, saveSensitive: true, encryptionPassword: password });
+      vaultUnlocked = true; hasSavedVault = true; secretsDirty = false;
+      toast('API Key 和手动代理地址已加密保存。');
+    }
+    updateVaultUi();
+  } catch (error) { toast(error); }
+  finally { $('unlock-vault').disabled = false; }
+});
+$('encryption-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('unlock-vault').click(); });
 $('proxy-mode').addEventListener('change', () => {
   updateProxy(); rememberOptions();
   if ($('proxy-mode').value !== 'manual' || $('proxy-url').value.trim()) scheduleReconfigure();
 });
-$('proxy-url').addEventListener('input', rememberOptions);
+$('proxy-url').addEventListener('input', () => {
+  secretsDirty = true; secretEditSeq += 1;
+  if ($('save-sensitive').checked && !vaultUnlocked) toast('请先解锁加密保险库，或关闭加密保存。');
+  rememberOptions();
+});
 $('proxy-url').addEventListener('change', scheduleReconfigure);
 updateProxy();
 for (const radio of document.querySelectorAll('input[name=mode]')) radio.addEventListener('change', () => { rememberOptions(); scheduleReconfigure(); });
@@ -249,8 +337,13 @@ if (isTauri) {
     $('preview-translated').textContent = event.payload.translated || '翻译结果将在这里显示。';
   });
   listen('session-notice', event => toast(event.payload));
-  invoke('get_status').then(renderStatus).then(updateModel).catch(toast);
-  refreshDevices();
+  (async () => {
+    try {
+      renderStatus(await invoke('get_status'));
+      await refreshDevices();
+      applySavedSettings(await invoke('get_saved_settings'));
+    } catch (error) { toast(error); }
+  })();
 } else {
   renderStatus({ platform: 'preview', message: '界面预览 · 请在 Tauri 客户端中运行' });
   updateModel();
