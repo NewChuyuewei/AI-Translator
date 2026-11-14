@@ -29,7 +29,8 @@ for (const line of current.split(/\r?\n/)) {
     continue;
   }
   if (line.startsWith('android.javaCompile.suppressSourceTargetDeprecationWarning=') ||
-      line.startsWith('kotlin.jvm.target.validation.mode=')) {
+      line.startsWith('kotlin.jvm.target.validation.mode=') ||
+      line.startsWith('kotlin.compiler.runViaBuildToolsApi=')) {
     continue;
   }
   if (line.startsWith('android.sync.suppressAgpWarnings=')) {
@@ -49,6 +50,7 @@ output.push(
   'android.javaCompile.suppressSourceTargetDeprecationWarning=true',
   '# The managed AGP enum stops at 24; the Kotlin 2.4 compiler receives target 25 directly.',
   'kotlin.jvm.target.validation.mode=ignore',
+  'kotlin.compiler.runViaBuildToolsApi=true',
   `android.sync.suppressAgpWarnings=${[...suppressions].sort().join(',')}`,
   '',
 );
