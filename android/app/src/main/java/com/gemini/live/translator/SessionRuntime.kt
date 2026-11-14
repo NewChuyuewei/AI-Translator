@@ -31,8 +31,10 @@ class SessionRuntime(context: Context) {
     private val pendingProjectionData = AtomicReference<Intent?>(null)
     private val mutableSession = MutableStateFlow<SessionState>(SessionState.Idle)
     private val mutableCaption = MutableStateFlow(CaptionState())
+    private val mutableOverlayEnabled = MutableStateFlow(false)
     val session: StateFlow<SessionState> = mutableSession.asStateFlow()
     val caption: StateFlow<CaptionState> = mutableCaption.asStateFlow()
+    val overlayEnabled: StateFlow<Boolean> = mutableOverlayEnabled.asStateFlow()
 
     init {
         scope.launch {
@@ -86,6 +88,12 @@ class SessionRuntime(context: Context) {
             }
         }
     }
+
+    fun setOverlayEnabled(enabled: Boolean) {
+        mutableOverlayEnabled.value = enabled
+    }
+
+    fun activeSessionConfig(): SessionConfig? = activeConfig.get()
 
     @Synchronized
     fun start(config: SessionConfig, projectionData: Intent? = null) {

@@ -22,6 +22,7 @@ data class MainUiState(
     val mode: GeminiMode = GeminiMode.LIVE_TRANSLATE,
     val audioSource: AudioSourceMode = AudioSourceMode.MICROPHONE,
     val rememberKey: Boolean = false,
+    val overlayEnabled: Boolean = false,
     val session: SessionState = SessionState.Idle,
     val caption: CaptionState = CaptionState(),
 )
@@ -35,6 +36,7 @@ class MainViewModel(
         MainUiState(
             apiKey = initialKey.orEmpty(),
             rememberKey = initialKey != null,
+            overlayEnabled = runtime.overlayEnabled.value,
             session = runtime.session.value,
             caption = runtime.caption.value,
         ),
@@ -55,6 +57,10 @@ class MainViewModel(
     fun setMode(value: GeminiMode) = mutableState.update { it.copy(mode = value, caption = CaptionState()) }
     fun setAudioSource(value: AudioSourceMode) = mutableState.update { it.copy(audioSource = value) }
     fun setRememberKey(value: Boolean) = mutableState.update { it.copy(rememberKey = value) }
+    fun setOverlayEnabled(value: Boolean) {
+        runtime.setOverlayEnabled(value)
+        mutableState.update { it.copy(overlayEnabled = value) }
+    }
 
     fun start(projectionData: Intent? = null) {
         val snapshot = mutableState.value

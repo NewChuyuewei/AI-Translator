@@ -14,12 +14,12 @@ Implemented in the native module:
 - selectable microphone-only, device-audio-only, or bounded real-time mixed input using 40 ms PCM16 frames;
 - silence suppression with a one-second VAD hangover, bounded 240 ms audio queues, and bounded WebSocket send backlog;
 - lifecycle-independent foreground service with notification stop control;
+- draggable, collapsible system overlay for live original/translated captions, with source status and stop/hide actions;
 - bounded native `AudioTrack` playback for translated 24 kHz PCM;
 - JVM-target and configuration validation tests.
 
 Remaining production work:
 
-- Compose system overlay;
 - proxy selection and 20k-token/minute budget enforcement;
 - emulator and physical-device validation, including Android 15+.
 
