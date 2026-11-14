@@ -1,7 +1,7 @@
 {
   "name": "gemini-live-translator",
   "private": true,
-  "version": "0.2.0",
+  "version": "1.0.0",
   "author": "chuyuewei",
   "license": "UNLICENSED",
   "type": "module",

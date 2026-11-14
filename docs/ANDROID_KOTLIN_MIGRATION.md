@@ -1,42 +1,43 @@
-# Android Kotlin + Compose migration plan
+# Android Kotlin + JDK 25 rewrite plan
 
-The Android target is moving toward a native Kotlin/Jetpack Compose presentation layer while retaining the audited Rust core for Gemini WebSocket, proxy routing, encryption, transcript parsing, and bounded audio mixing.
+The `1.0.0` version milestone does not validate the existing Android target. Android will be rewritten separately as a fully native Kotlin application built with JDK 25. The rewrite will not reuse the current Tauri/WebView or Rust/JNI Android runtime path.
 
-## Architecture boundary
+## Target architecture
 
-- **Kotlin/Compose:** activities and screens, runtime permissions, `MediaProjection`, foreground-service lifecycle, notification controls, `AudioRecord`, and the system caption overlay.
-- **Rust:** validated session options, secrets vault, TLS/WebSocket transport, proxy tunnelling, protocol parsing, resampling/mixing, diagnostics, and session state machine.
-- **Bridge:** typed, bounded commands and state events only. Raw PCM continues to use JNI and must never travel through WebView JSON IPC.
+- **UI:** Jetpack Compose and Material 3 for activities, settings, diagnostics, captions, and adaptive phone/tablet layouts.
+- **Lifecycle:** Kotlin services and coroutines for runtime permissions, `MediaProjection`, foreground-service lifecycle, notification controls, process recreation, and audio focus.
+- **Audio:** Kotlin/Android `AudioRecord`, playback capture, bounded channels, resampling, mixing, and backpressure.
+- **Networking:** Kotlin coroutines with a native JVM WebSocket/TLS client, proxy routing, reconnect policy, Gemini protocol handling, and rate limiting.
+- **Security:** Android Keystore-backed secret storage, bounded configuration parsing, redacted logs, screenshot protection, and explicit secret cleanup.
+- **Build:** stable JDK 25, stable Kotlin, stable Android Gradle Plugin/Gradle, Java source/target 25, and Kotlin JVM target 25. No alpha, beta, or RC toolchain releases.
 
-This split avoids duplicating security-sensitive network and cryptographic code while allowing Android UI and lifecycle behavior to become fully native.
+Desktop platforms keep their existing Tauri/Rust implementation. Android shares protocol fixtures and behavioral tests rather than native Rust code.
 
 ## Delivery stages
 
-### Stage 1 — latency and safety baseline (current)
+### Stage 1 — isolate the new Android application
 
-- 40 ms end-to-end PCM frames instead of 100 ms frames.
-- Bounded Rust, JNI, and network queues that discard stale audio under pressure.
-- Android audio-priority reader threads and a smaller `AudioRecord` buffer floor.
-- Removal of the unusable privileged `CAPTURE_AUDIO_OUTPUT` permission; playback capture relies only on user-approved `MediaProjection`.
-- Bounded local configuration reads and prompt erasure of temporary vault key/plaintext buffers.
-- Existing Android capture, permissions, service, overlay, and bridge code remains Kotlin.
+- Create a standalone Android module so the rewrite does not depend on Tauri-generated Gradle files.
+- Establish Compose navigation, dependency injection boundaries, settings models, and fake Gemini/audio implementations.
+- Add unit tests and CI checks that inspect Java and Kotlin class-file targets before D8/R8 packaging.
 
-### Stage 2 — native Compose shell
+### Stage 2 — native audio and lifecycle
 
-- Add a native Compose activity with Material 3 design tokens and adaptive phone/tablet layouts.
-- Expose typed Rust commands for settings, status, diagnostics, device capabilities, start, and stop.
-- Replace the Android WebView control panel; desktop keeps the existing Tauri UI.
-- Keep API keys in password fields and prevent them from entering Compose saved state, logs, screenshots, or clipboard.
+- Implement microphone and user-approved playback capture with 40 ms frames.
+- Use bounded coroutine channels and discard stale audio under pressure.
+- Add foreground-service notification controls, permission cancellation, rapid start/stop, and process-recreation tests.
 
-### Stage 3 — native Compose overlay and lifecycle hardening
+### Stage 3 — Gemini transport and security
 
-- Replace the current Kotlin `View` overlay with a Compose overlay hosted by a lifecycle-aware service.
-- Add notification stop action, process-recreation recovery, audio-focus behavior, and instrumentation tests for permission cancellation and rapid start/stop.
-- Add Macrobenchmark measurements for cold start, frame delivery, recomposition, and memory.
+- Implement Gemini Live WebSocket transport, proxy tunnelling, model discovery, reconnect behavior, and the 20k-token/minute budget.
+- Store API keys and proxy credentials with Android Keystore-backed encryption.
+- Keep secrets, raw audio, and transcript payloads out of logs, saved Compose state, screenshots, and clipboard by default.
 
-### Stage 4 — 1.0 validation
+### Stage 4 — Compose captions and validation
 
-The project uses `0.2.0` during the migration and remains pre-1.0 until desktop and Android CI, physical-device tests, real Gemini sessions, upgrade tests, release signing, accessibility checks, and privacy/security review pass. Only then should all package, Cargo, Tauri, Android, installer, and documentation versions be changed together to `1.0.0`.
+- Implement the control UI and lifecycle-aware Compose caption overlay.
+- Validate cold start, latency, memory, accessibility, upgrade behavior, Android 8/API 26 minimum compatibility, and Android 15+ startup on physical devices.
+- Produce a signed release only after CI, D8/R8, emulator, and physical-device checks pass.
 
 ## Performance budgets
 

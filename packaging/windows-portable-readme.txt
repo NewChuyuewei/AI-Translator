@@ -1,4 +1,4 @@
-Gemini Live Translator 0.2.0 · Windows 64 位免安装版
+Gemini Live Translator 1.0.0 · Windows 64 位免安装版
 Copyright © 2026 chuyuewei. All rights reserved. 版权所有，保留所有权利。
 
 1. 将压缩包中的所有文件解压到同一文件夹，不要仅取出 .exe。
