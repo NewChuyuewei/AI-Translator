@@ -33,9 +33,11 @@ jobs:
             label: Windows x64
             bundles: nsis
             artifact: windows-x64
-          # macOS 14 runners retired on 2026-11-02. The standard macos-15
-          # image is the supported Apple Silicon runner.
-          - os: macos-15
+          # screencapturekit 11 pulls apple-metal 0.10, whose Swift bridge
+          # references Metal APIs from the macOS 26 SDK. macos-15 defaults to
+          # Xcode 16.4 even though newer Xcodes are installed, so use the
+          # Apple Silicon image whose default toolchain is Xcode 26.
+          - os: macos-26
             label: macOS Apple Silicon
             bundles: dmg
             artifact: macos-arm64
@@ -54,6 +56,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Verify macOS 26 SDK toolchain
+        if: runner.os == 'macOS'
+        run: |
+          xcodebuild -version
+          test "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -ge 26
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
