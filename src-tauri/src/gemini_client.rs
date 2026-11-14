@@ -52,6 +52,21 @@ pub struct GeminiOptions {
     #[serde(default = "default_other_language")] pub other_language: String,
 }
 fn default_other_language() -> String { "en".into() }
+fn language_instruction_name(code: &str) -> String {
+    let name = match code.to_ascii_lowercase().as_str() {
+        "zh" | "zh-hans" | "cmn-hans" => "Simplified Chinese",
+        "zh-hant" | "cmn-hant" => "Traditional Chinese",
+        "en" | "en-us" | "en-gb" => "English",
+        "ja" | "ja-jp" => "Japanese",
+        "ko" | "ko-kr" => "Korean",
+        "es" => "Spanish",
+        "fr" => "French",
+        "de" => "German",
+        "it" => "Italian",
+        _ => return format!("the language identified by BCP-47 code {code}"),
+    };
+    format!("{name} ({code})")
+}
 fn valid_language(value: &str) -> bool {
     (2..=24).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-')
 }
@@ -92,10 +107,12 @@ pub fn setup(options: &GeminiOptions) -> Value {
             "inputAudioTranscription": {"languageCodes": [], "mode": options.transcription_mode}
         }}),
         ModelKind::GeneralLive | ModelKind::ExtendedThinking => {
+            let target = language_instruction_name(&options.target_language);
+            let other = language_instruction_name(&options.other_language);
             let instruction = if options.bidirectional {
-                format!("You are a simultaneous interpreter, not an assistant. Translate speech in {} into {} and speech in {} into {}. Output only the spoken translation, preserving intent and names; do not answer, explain or add commentary.", options.target_language, options.other_language, options.other_language, options.target_language)
+                format!("Act only as a low-latency simultaneous interpreter. Translate speech in {target} into {other}, and speech in {other} into {target}. Start each translation as soon as a meaningful phrase is available. Output only the translation in the opposite language. Never repeat or transcribe the source language, answer questions, explain, add commentary, or mix source and target languages.")
             } else {
-                format!("You are a simultaneous interpreter, not an assistant. Translate all heard speech into {}. Output only the spoken translation, preserving intent and names. Do not answer, explain or add commentary.", options.target_language)
+                format!("Act only as a low-latency simultaneous interpreter. Translate every heard utterance into {target}. Start speaking the translation as soon as a meaningful phrase is available instead of waiting for a full paragraph. Output only {target}. Never repeat or transcribe the source language, answer questions, explain, add commentary, or mix source and target languages.")
             };
             let (model, generation) = match options.model {
                 ModelKind::GeneralLive => ("models/gemini-3.8-live", json!({"responseModalities": ["AUDIO"]})),
@@ -107,6 +124,13 @@ pub fn setup(options: &GeminiOptions) -> Value {
             json!({"setup": {
                 "model": model, "generationConfig": generation,
                 "systemInstruction": {"parts": [{"text": instruction}]},
+                "realtimeInputConfig": {"automaticActivityDetection": {
+                    "disabled": false,
+                    "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+                    "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
+                    "prefixPaddingMs": 40,
+                    "silenceDurationMs": 400
+                }},
                 "inputAudioTranscription": {}, "outputAudioTranscription": {}
             }})
         }
@@ -282,7 +306,10 @@ pub fn classify_message(value: &Value) -> &'static str {
     else if field(value, "sessionResumptionUpdate", "session_resumption_update").is_some() { "sessionResumptionUpdate" }
     else if field(value, "interactionStatus", "interaction_status").is_some() { "interactionStatus" }
     else if field(value, "toolCall", "tool_call").is_some() { "toolCall" }
-    else { "其他 JSON 消息" }
+    else if field(value, "toolCallCancellation", "tool_call_cancellation").is_some() { "toolCallCancellation" }
+    // Gemini may add forward-compatible metadata envelopes. They are valid
+    // JSON but carry no audio/transcription state this client needs.
+    else { "协议元数据（已安全忽略）" }
 }
 
 // Map untrusted server text to a fixed, generic hint; do not expose its reason,
@@ -501,6 +528,12 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
         assert!(!logs.contains("PRIVATE-API-KEY-123") && !error.contains("PRIVATE-API-KEY-123"));
     }
 
+    #[test]
+    fn classifies_forward_compatible_metadata_without_exposing_payloads() {
+        assert_eq!(classify_message(&json!({"toolCallCancellation": {"ids": ["private"]}})), "toolCallCancellation");
+        assert_eq!(classify_message(&json!({"futureMetadata": {"private": "value"}})), "协议元数据（已安全忽略）");
+    }
+
     #[test] fn rejects_oversized_credentials_and_invalid_languages() {
         let mut options = opts(ModelKind::GeneralLive);
         options.api_key = "x".repeat(513);
@@ -515,6 +548,9 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
         assert_eq!(general["setup"]["model"], "models/gemini-3.8-live");
         assert!(general["setup"]["generationConfig"].get("thinkingConfig").is_none());
         assert!(general["setup"]["generationConfig"].get("translationConfig").is_none());
+        let instruction = general["setup"]["systemInstruction"]["parts"][0]["text"].as_str().unwrap();
+        assert!(instruction.contains("Simplified Chinese (zh)") && instruction.contains("Never repeat"));
+        assert_eq!(general["setup"]["realtimeInputConfig"]["automaticActivityDetection"]["silenceDurationMs"], 400);
         for (level, expected) in [(ThinkingLevel::Low,"LOW"), (ThinkingLevel::Medium,"MEDIUM"), (ThinkingLevel::High,"HIGH")] {
             let mut options = opts(ModelKind::ExtendedThinking); options.thinking_level = level; options.bidirectional = true;
             assert!(options.validate().is_ok());

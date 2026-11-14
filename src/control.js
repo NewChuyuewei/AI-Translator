@@ -260,8 +260,8 @@ function updateModel() {
   let modelInfo;
   if (transcribe) modelInfo = '仅实时转写原文，不翻译、不播放译音；自动检测语言。单次最长 10 分钟，断开后需手动重新开始。';
   else if (translation35) modelInfo = '专用语音翻译：每次会话固定一个目标语言，不支持双向切换；输入已是目标语言时不复述。';
-  else if (extended) modelInfo = 'Extended Thinking 使用译员指令；推理深度越高可能延迟越大。双向识别依赖模型判断。';
-  else modelInfo = '3.8 使用译员指令；双向切换依赖模型判断，并非两条独立译流。';
+  else if (extended) modelInfo = 'Extended Thinking 使用译员指令；推理深度会显著增加首段翻译延迟，实时对话优先选择“低”。双向识别依赖模型判断。';
+  else modelInfo = '3.8 是通用模型：已启用快速端点检测，但连续讲话时仍可能等待语义边界；追求同传延迟请优先使用 3.5 Live Translate。双向切换依赖模型判断。';
   $('model-hint').textContent = modelInfo + (status.platform === 'android' ? ' Android 系统内录需 Android 10+、每次授权，且源应用允许捕获。' : '');
   // During a settings change the old session stays active until it stops; its
   // status and captions must reflect the actual model, not the new selection.

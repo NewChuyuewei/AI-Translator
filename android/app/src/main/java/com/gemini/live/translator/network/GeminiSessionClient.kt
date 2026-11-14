@@ -248,11 +248,24 @@ class GeminiSessionClient : SessionClient {
                 if (config.mode == GeminiMode.EXTENDED_THINKING) {
                     generation.put("thinkingConfig", JSONObject().put("thinkingLevel", "MEDIUM"))
                 }
-                val instruction = "You are a simultaneous interpreter, not an assistant. " +
-                    "Translate all heard speech into ${config.targetLanguage}. " +
-                    "Output only the spoken translation, preserving intent and names. " +
-                    "Do not answer, explain or add commentary."
+                val target = languageInstructionName(config.targetLanguage)
+                val instruction = "Act only as a low-latency simultaneous interpreter. " +
+                    "Translate every heard utterance into $target. " +
+                    "Start speaking the translation as soon as a meaningful phrase is available instead of waiting for a full paragraph. " +
+                    "Output only $target. Never repeat or transcribe the source language, answer questions, explain, " +
+                    "add commentary, or mix source and target languages."
                 setup.put(
+                    "realtimeInputConfig",
+                    JSONObject().put(
+                        "automaticActivityDetection",
+                        JSONObject()
+                            .put("disabled", false)
+                            .put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
+                            .put("endOfSpeechSensitivity", "END_SENSITIVITY_HIGH")
+                            .put("prefixPaddingMs", 40)
+                            .put("silenceDurationMs", 400),
+                    ),
+                ).put(
                     "systemInstruction",
                     JSONObject().put(
                         "parts",
@@ -263,6 +276,22 @@ class GeminiSessionClient : SessionClient {
             }
         }
         return JSONObject().put("setup", setup)
+    }
+
+    private fun languageInstructionName(code: String): String {
+        val name = when (code.lowercase()) {
+            "zh", "zh-hans", "cmn-hans" -> "Simplified Chinese"
+            "zh-hant", "cmn-hant" -> "Traditional Chinese"
+            "en", "en-us", "en-gb" -> "English"
+            "ja", "ja-jp" -> "Japanese"
+            "ko", "ko-kr" -> "Korean"
+            "es" -> "Spanish"
+            "fr" -> "French"
+            "de" -> "German"
+            "it" -> "Italian"
+            else -> return "the language identified by BCP-47 code $code"
+        }
+        return "$name ($code)"
     }
 
     private companion object {
