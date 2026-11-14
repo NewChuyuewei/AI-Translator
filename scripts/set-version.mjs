@@ -24,8 +24,10 @@ json('package-lock.json', value => {
 });
 replace('src-tauri/tauri.conf.json', /(\"version\"\s*:\s*\")[^\"]+(\")/, `$1${version}$2`, 'Tauri version');
 replace('src-tauri/tauri.android.conf.json', /(\"version\"\s*:\s*\")[^\"]+(\")/, `$1${version}$2`, 'Android Tauri version');
-replace('src-tauri/Cargo.toml', /(\[package\][\s\S]*?\nversion = ")[^"]+("\n)/, `$1${version}$2`, 'Cargo package version');
-replace('src-tauri/Cargo.lock', /(\[\[package\]\]\nname = "gemini-live-translator"\nversion = ")[^"]+("\n)/, `$1${version}$2`, 'Cargo lock application version');
+// Git may check text files out as CRLF on Windows runners. Match logical line
+// boundaries rather than assuming LF so custom releases are platform-neutral.
+replace('src-tauri/Cargo.toml', /(\[package\][\s\S]*?[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo package version');
+replace('src-tauri/Cargo.lock', /(\[\[package\]\][\r\n]+name\s*=\s*"gemini-live-translator"[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo lock application version');
 replace('packaging/windows-installer.nsi', /!define PRODUCT_VERSION "[^"]+"/, `!define PRODUCT_VERSION "${version}"`, 'NSIS product version');
 replace('packaging/windows-portable-readme.txt', /^Gemini Live Translator [^ ]+/m, `Gemini Live Translator ${version}`, 'portable package version');
 
