@@ -38,4 +38,16 @@ jobs:
       - run: npm run test:ui
       - run: npm run test:version
       - run: npm run test:android-config
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+      - name: Run Rust tests
+        run: |
+          if cargo test --manifest-path src-tauri/Cargo.toml --lib --locked >rust-test.log 2>&1; then
+            cat rust-test.log
+          else
+            cat rust-test.log
+            details="$(grep -E -i -B 3 -A 10 'error\[|error:|failed|panicked' rust-test.log | tail -c 12000)"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            echo "::error title=Rust tests failed::${details}"
+            exit 1
+          fi
