@@ -1,5 +1,9 @@
 package com.gemini.live.translator.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,9 +26,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gemini.live.translator.data.GeminiMode
 import com.gemini.live.translator.data.SessionState
@@ -32,6 +38,10 @@ import com.gemini.live.translator.data.SessionState
 @Composable
 fun TranslatorScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) viewModel.start() else viewModel.microphonePermissionDenied()
+    }
     val active = state.session is SessionState.Connecting || state.session is SessionState.Running || state.session is SessionState.Stopping
     Scaffold { padding ->
         Column(
@@ -76,7 +86,18 @@ fun TranslatorScreen(viewModel: MainViewModel) {
                 singleLine = true,
                 enabled = !active && !state.mode.transcriptionOnly,
             )
-            Button(onClick = if (active) viewModel::stop else viewModel::start, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    if (active) {
+                        viewModel.stop()
+                    } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        viewModel.start()
+                    } else {
+                        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text(if (active) "停止" else "开始")
             }
             SessionStatus(state.session)

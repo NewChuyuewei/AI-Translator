@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.gemini.live.translator.audio.MicrophoneCapture
 import com.gemini.live.translator.network.GeminiSessionClient
 import com.gemini.live.translator.security.SecretStore
 import com.gemini.live.translator.ui.MainViewModel
@@ -18,7 +19,7 @@ class MainActivity : ComponentActivity() {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 require(modelClass == MainViewModel::class.java)
-                return MainViewModel(GeminiSessionClient(), SecretStore(applicationContext)) as T
+                return MainViewModel(GeminiSessionClient(), SecretStore(applicationContext), MicrophoneCapture()) as T
             }
         }
     }

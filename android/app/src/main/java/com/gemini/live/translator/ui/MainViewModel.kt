@@ -2,6 +2,7 @@ package com.gemini.live.translator.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.gemini.live.translator.audio.MicrophoneCapture
 import com.gemini.live.translator.data.CaptionState
 import com.gemini.live.translator.data.GeminiMode
 import com.gemini.live.translator.data.SessionConfig
@@ -27,6 +28,7 @@ data class MainUiState(
 class MainViewModel(
     private val client: SessionClient,
     private val secrets: SecretStore,
+    private val microphone: MicrophoneCapture,
 ) : ViewModel() {
     private val initialKey = secrets.loadApiKey()
     private val mutableState = MutableStateFlow(
@@ -37,12 +39,28 @@ class MainViewModel(
     init {
         viewModelScope.launch {
             client.events.collect { event ->
-                mutableState.update { current ->
-                    when (event) {
-                        ClientEvent.Connected -> current.copy(session = SessionState.Running)
-                        is ClientEvent.Caption -> current.copy(caption = event.value)
-                        is ClientEvent.Failed -> current.copy(session = SessionState.Failed(event.safeMessage))
-                        ClientEvent.Closed -> current.copy(session = SessionState.Idle)
+                when (event) {
+                    ClientEvent.Connected -> {
+                        mutableState.update { it.copy(session = SessionState.Running) }
+                        microphone.start(
+                            scope = viewModelScope,
+                            onFrame = { frame ->
+                                try { client.sendAudio(frame) } finally { frame.fill(0) }
+                            },
+                            onError = { message ->
+                                client.stop()
+                                mutableState.update { it.copy(session = SessionState.Failed(message)) }
+                            },
+                        )
+                    }
+                    is ClientEvent.Caption -> mutableState.update { it.copy(caption = event.value) }
+                    is ClientEvent.Failed -> {
+                        microphone.stop()
+                        mutableState.update { it.copy(session = SessionState.Failed(event.safeMessage)) }
+                    }
+                    ClientEvent.Closed -> {
+                        microphone.stop()
+                        mutableState.update { it.copy(session = SessionState.Idle) }
                     }
                 }
             }
@@ -71,10 +89,16 @@ class MainViewModel(
 
     fun stop() {
         mutableState.update { it.copy(session = SessionState.Stopping) }
+        microphone.stop()
         client.stop()
     }
 
+    fun microphonePermissionDenied() {
+        mutableState.update { it.copy(session = SessionState.Failed("需要麦克风权限才能开始")) }
+    }
+
     override fun onCleared() {
+        microphone.stop()
         client.stop()
         super.onCleared()
     }

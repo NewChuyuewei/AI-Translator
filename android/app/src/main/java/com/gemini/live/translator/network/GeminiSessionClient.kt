@@ -1,5 +1,6 @@
 package com.gemini.live.translator.network
 
+import com.gemini.live.translator.audio.PCM_FRAME_BYTES
 import com.gemini.live.translator.data.CaptionState
 import com.gemini.live.translator.data.GeminiMode
 import com.gemini.live.translator.data.SessionConfig
@@ -15,10 +16,12 @@ import okio.ByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import android.util.Base64
 
 interface SessionClient {
     val events: SharedFlow<ClientEvent>
     fun connect(config: SessionConfig)
+    fun sendAudio(frame: ByteArray): Boolean
     fun stop()
 }
 
@@ -50,18 +53,34 @@ class GeminiSessionClient : SessionClient {
             .url(ENDPOINT)
             .header("x-goog-api-key", checked.apiKey)
             .build()
-        val candidate = http.newWebSocket(request, Listener(checked))
+        val setupMessage = setup(checked).toString()
+        val candidate = http.newWebSocket(request, Listener(setupMessage))
         if (!socket.compareAndSet(null, candidate)) candidate.cancel()
+    }
+
+    override fun sendAudio(frame: ByteArray): Boolean {
+        require(frame.size == PCM_FRAME_BYTES) { "audio frame must be 40 ms PCM16" }
+        val active = socket.get() ?: return false
+        if (active.queueSize() > MAX_SOCKET_QUEUE_BYTES) return false
+        val encoded = Base64.encodeToString(frame, Base64.NO_WRAP)
+        val message = JSONObject().put(
+            "realtimeInput",
+            JSONObject().put(
+                "audio",
+                JSONObject().put("mimeType", "audio/pcm;rate=16000").put("data", encoded),
+            ),
+        )
+        return active.send(message.toString())
     }
 
     override fun stop() {
         socket.getAndSet(null)?.close(1000, "client stop")
     }
 
-    private inner class Listener(private val config: SessionConfig) : WebSocketListener() {
+    private inner class Listener(private val setupMessage: String) : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (socket.get() !== webSocket) return
-            webSocket.send(setup(config).toString())
+            webSocket.send(setupMessage)
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -138,5 +157,6 @@ class GeminiSessionClient : SessionClient {
         const val MAX_MESSAGE_BYTES = 2 * 1024 * 1024
         const val MAX_MESSAGE_CHARS = 2 * 1024 * 1024
         const val MAX_TRANSCRIPT_CHARS = 16_000
+        const val MAX_SOCKET_QUEUE_BYTES = 32L * 1024
     }
 }
