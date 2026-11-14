@@ -21,6 +21,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicReference
 
+internal fun mergeCaption(current: CaptionState, incoming: CaptionState): CaptionState = CaptionState(
+    original = incoming.original.ifEmpty { current.original },
+    translated = incoming.translated.ifEmpty { current.translated },
+)
+
 class SessionRuntime(context: Context) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -37,6 +42,12 @@ class SessionRuntime(context: Context) {
     val overlayEnabled: StateFlow<Boolean> = mutableOverlayEnabled.asStateFlow()
 
     init {
+        scope.launch {
+            client.audio.collect { pcm ->
+                if (mutableSession.value is SessionState.Running) player.offer(pcm)
+                pcm.fill(0)
+            }
+        }
         scope.launch {
             client.events.collect { event ->
                 when (event) {
@@ -80,8 +91,12 @@ class SessionRuntime(context: Context) {
                             player.start(scope, ::fail)
                         }
                     }
-                    is ClientEvent.Caption -> mutableCaption.value = event.value
-                    is ClientEvent.Audio -> player.offer(event.pcm).also { event.pcm.fill(0) }
+                    is ClientEvent.Caption -> if (mutableSession.value is SessionState.Running) {
+                        mutableCaption.update { mergeCaption(it, event.value) }
+                    }
+                    // Audio is delivered on a dedicated bounded flow so it
+                    // cannot displace connection failures or caption events.
+                    is ClientEvent.Audio -> event.pcm.fill(0)
                     is ClientEvent.Failed -> fail(event.safeMessage)
                     ClientEvent.Closed -> finish()
                 }

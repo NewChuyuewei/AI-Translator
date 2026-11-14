@@ -15,7 +15,11 @@ import java.util.concurrent.atomic.AtomicReference
 class TranslatedAudioPlayer {
     private val track = AtomicReference<AudioTrack?>(null)
     private val worker = AtomicReference<Job?>(null)
-    private val audio = Channel<ByteArray>(capacity = 12, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val audio = Channel<ByteArray>(
+        capacity = 12,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = { it.fill(0) },
+    )
 
     fun start(scope: CoroutineScope, onError: (String) -> Unit) {
         if (worker.get() != null) return
@@ -85,7 +89,10 @@ class TranslatedAudioPlayer {
         job.invokeOnCompletion { worker.compareAndSet(job, null) }
     }
 
-    fun offer(bytes: ByteArray): Boolean = audio.trySend(bytes.copyOf()).isSuccess
+    fun offer(bytes: ByteArray): Boolean {
+        val copy = bytes.copyOf()
+        return audio.trySend(copy).isSuccess.also { accepted -> if (!accepted) copy.fill(0) }
+    }
 
     fun stop() {
         track.getAndSet(null)?.let { runCatching { it.pause() }; it.flush() }

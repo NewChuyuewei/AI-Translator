@@ -384,7 +384,9 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
                 inner.status.phase = "idle".into(); inner.status.message = "已停止".into();
             } else {
                 inner.status.phase = "error".into();
-                inner.status.message = trace.redact(&format!("{:#}", result.err().unwrap()));
+                inner.status.message = result.as_ref().err()
+                    .map(|error| trace.redact(&format!("{error:#}")))
+                    .unwrap_or_else(|| "会话异常结束".into());
             }
             if inner.status.network_route == "正在选择网络路径…" { inner.status.network_route = "未选定".into(); }
             let status = inner.status.clone(); drop(inner); publish(&app, &status);
