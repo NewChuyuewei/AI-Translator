@@ -70,7 +70,18 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
       - name: Test and build native Android app
-        run: gradle -p android --no-daemon testDebugUnitTest assembleDebug
+        run: |
+          if gradle -p android --no-daemon testDebugUnitTest assembleDebug >android-native.log 2>&1; then
+            cat android-native.log
+          else
+            tail -n 240 android-native.log
+            details="$(grep -E -i -B 4 -A 12 'FAILURE:|What went wrong:|^e: |error:|exception|could not|failed' android-native.log | tail -c 12000)"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            echo "::error title=Native Android build failed::${details}"
+            exit 1
+          fi
       - name: Verify Kotlin and Java 25 bytecode
         run: |
           python3 - <<'PY'
