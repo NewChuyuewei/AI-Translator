@@ -7,6 +7,33 @@ import kotlinx.coroutines.channels.Channel
 const val PCM_FRAME_BYTES: Int = 16_000 * 40 / 1_000 * 2
 const val MAX_QUEUED_AUDIO_MS: Int = 240
 
+class SilenceGate(
+    private val threshold: Double = 0.003,
+    private val hangoverFrames: Int = 25,
+) {
+    private var quietFrames = 0
+
+    fun shouldSend(frame: ByteArray): Boolean {
+        require(frame.size == PCM_FRAME_BYTES)
+        var sumSquares = 0.0
+        var offset = 0
+        while (offset < frame.size) {
+            val sample = ((frame[offset].toInt() and 0xff) or (frame[offset + 1].toInt() shl 8)).toShort()
+            val normalized = sample.toDouble() / 32_768.0
+            sumSquares += normalized * normalized
+            offset += 2
+        }
+        val rms = kotlin.math.sqrt(sumSquares / (frame.size / 2))
+        return if (rms >= threshold) {
+            quietFrames = 0
+            true
+        } else {
+            quietFrames++
+            quietFrames <= hangoverFrames
+        }
+    }
+}
+
 class PcmFrameQueue {
     private val frames = Channel<ByteArray>(
         capacity = MAX_QUEUED_AUDIO_MS / 40,

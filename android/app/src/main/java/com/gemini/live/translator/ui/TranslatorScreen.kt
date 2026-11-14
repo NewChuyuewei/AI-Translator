@@ -2,6 +2,7 @@ package com.gemini.live.translator.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -39,8 +40,12 @@ import com.gemini.live.translator.data.SessionState
 fun TranslatorScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) viewModel.start() else viewModel.microphonePermissionDenied()
+    val requiredPermissions = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    val permissionRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (requiredPermissions.all { grants[it] == true }) viewModel.start() else viewModel.microphonePermissionDenied()
     }
     val active = state.session is SessionState.Connecting || state.session is SessionState.Running || state.session is SessionState.Stopping
     Scaffold { padding ->
@@ -90,10 +95,12 @@ fun TranslatorScreen(viewModel: MainViewModel) {
                 onClick = {
                     if (active) {
                         viewModel.stop()
-                    } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    } else if (requiredPermissions.all { permission ->
+                            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+                        }) {
                         viewModel.start()
                     } else {
-                        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                        permissionRequest.launch(requiredPermissions.toTypedArray())
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
