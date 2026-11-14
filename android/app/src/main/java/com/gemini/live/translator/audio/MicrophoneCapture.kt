@@ -43,6 +43,7 @@ class MicrophoneCapture {
         activeRecord.set(record)
         val job = scope.launch(Dispatchers.IO) {
             val frame = ByteArray(PCM_FRAME_BYTES)
+            val silenceGate = SilenceGate()
             try {
                 record.startRecording()
                 while (isActive && activeRecord.get() === record) {
@@ -52,7 +53,7 @@ class MicrophoneCapture {
                         if (count <= 0) throw IllegalStateException("audio read failed")
                         offset += count
                     }
-                    if (offset == frame.size) onFrame(frame.copyOf())
+                    if (offset == frame.size && silenceGate.shouldSend(frame)) onFrame(frame.copyOf())
                 }
             } catch (_: Exception) {
                 if (activeRecord.get() === record) onError("麦克风采集意外停止")

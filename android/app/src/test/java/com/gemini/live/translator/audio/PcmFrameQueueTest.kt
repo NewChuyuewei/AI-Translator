@@ -18,6 +18,22 @@ class PcmFrameQueueTest {
     }
 
     @Test
+    fun silenceGateKeepsVadHangoverThenSuppressesSilence() {
+        val gate = SilenceGate()
+        val silence = ByteArray(PCM_FRAME_BYTES)
+        repeat(25) { assertEquals(true, gate.shouldSend(silence)) }
+        assertEquals(false, gate.shouldSend(silence))
+        val speech = ByteArray(PCM_FRAME_BYTES).apply {
+            for (index in indices step 2) {
+                this[index] = 0x00
+                this[index + 1] = 0x20
+            }
+        }
+        assertEquals(true, gate.shouldSend(speech))
+        assertEquals(true, gate.shouldSend(silence))
+    }
+
+    @Test
     fun rejectsNonFortyMillisecondFrames() {
         val queue = PcmFrameQueue()
         assertThrows(IllegalArgumentException::class.java) { queue.offer(ByteArray(10)) }
