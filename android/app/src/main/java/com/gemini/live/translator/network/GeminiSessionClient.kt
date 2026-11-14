@@ -220,14 +220,49 @@ class GeminiSessionClient : SessionClient {
     }.getOrElse { listOf(ClientEvent.Failed("Gemini 返回了无效消息")) }
 
     private fun setup(config: SessionConfig): JSONObject {
-        val generation = JSONObject().put("responseModalities", if (config.mode.transcriptionOnly) org.json.JSONArray().put("TEXT") else org.json.JSONArray().put("AUDIO"))
-        if (config.mode == GeminiMode.LIVE_TRANSLATE) {
-            generation.put("translationConfig", JSONObject().put("targetLanguageCode", config.targetLanguage).put("echoTargetLanguage", false))
-        }
-        return JSONObject().put("setup", JSONObject()
+        val generation = JSONObject().put(
+            "responseModalities",
+            org.json.JSONArray().put(if (config.mode.transcriptionOnly) "TEXT" else "AUDIO"),
+        )
+        val setup = JSONObject()
             .put("model", config.mode.wireModel)
             .put("generationConfig", generation)
-            .put("inputAudioTranscription", JSONObject()))
+        when (config.mode) {
+            GeminiMode.LIVE_TRANSLATE -> {
+                generation.put(
+                    "translationConfig",
+                    JSONObject()
+                        .put("targetLanguageCode", config.targetLanguage)
+                        .put("echoTargetLanguage", false),
+                )
+                setup.put("inputAudioTranscription", JSONObject())
+                    .put("outputAudioTranscription", JSONObject())
+            }
+            GeminiMode.LIVE_TRANSCRIBE -> setup.put(
+                "inputAudioTranscription",
+                JSONObject()
+                    .put("languageCodes", org.json.JSONArray())
+                    .put("mode", "VERBATIM"),
+            )
+            GeminiMode.GENERAL_LIVE, GeminiMode.EXTENDED_THINKING -> {
+                if (config.mode == GeminiMode.EXTENDED_THINKING) {
+                    generation.put("thinkingConfig", JSONObject().put("thinkingLevel", "MEDIUM"))
+                }
+                val instruction = "You are a simultaneous interpreter, not an assistant. " +
+                    "Translate all heard speech into ${config.targetLanguage}. " +
+                    "Output only the spoken translation, preserving intent and names. " +
+                    "Do not answer, explain or add commentary."
+                setup.put(
+                    "systemInstruction",
+                    JSONObject().put(
+                        "parts",
+                        org.json.JSONArray().put(JSONObject().put("text", instruction)),
+                    ),
+                ).put("inputAudioTranscription", JSONObject())
+                    .put("outputAudioTranscription", JSONObject())
+            }
+        }
+        return JSONObject().put("setup", setup)
     }
 
     private companion object {
