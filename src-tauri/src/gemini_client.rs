@@ -7,10 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashSet, time::{Duration, Instant}};
 use tokio::{net::TcpStream, sync::watch};
-use tokio_tungstenite::{client_async_tls_with_config, tungstenite::{client::IntoClientRequest, http::HeaderValue, Error as WsError, Message}, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{client_async_tls_with_config, tungstenite::{client::IntoClientRequest, http::HeaderValue, protocol::WebSocketConfig, Error as WsError, Message}, MaybeTlsStream, WebSocketStream};
 use crate::{diagnostics::Trace, proxy::{self, Route}};
 
 const ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+const MAX_SERVER_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024;
+const MAX_AUDIO_BYTES_PER_MESSAGE: usize = 1024 * 1024;
 pub type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -164,7 +167,10 @@ async fn connect_with_trace(endpoint: &str, options: &GeminiOptions, route: &Rou
         trace.info("开始 TLS / WebSocket 握手（验证服务端证书）");
         // TLS and certificate/hostname validation are performed AFTER the
         // proxy tunnel is established, before the API-key header is sent.
-        client_async_tls_with_config(request, tcp, None, connector).await
+        let mut websocket = WebSocketConfig::default();
+        websocket.max_message_size = Some(MAX_SERVER_MESSAGE_BYTES);
+        websocket.max_frame_size = Some(MAX_SERVER_MESSAGE_BYTES);
+        client_async_tls_with_config(request, tcp, Some(websocket), connector).await
             .map_err(|e| anyhow!("Gemini WebSocket/TLS 握手失败：{}", describe_ws_error(&e)))
     };
     let (mut socket, response) = tokio::select! {
@@ -242,10 +248,17 @@ pub enum ServerFrame {
     Control(&'static str),
 }
 pub fn decode_server_frame(message: Message) -> Result<ServerFrame> {
-    let (kind, data) = match message {
-        Message::Text(text) => ("文本", text.to_string()),
-        Message::Binary(bytes) => ("二进制", std::str::from_utf8(&bytes)
-            .map_err(|_| anyhow!("Gemini 二进制帧不是有效 UTF-8"))?.to_owned()),
+    let (kind, value) = match message {
+        Message::Text(text) => {
+            if text.len() > MAX_SERVER_MESSAGE_BYTES { return Err(anyhow!("Gemini 文本帧超过大小限制")); }
+            ("文本", serde_json::from_str(&text).map_err(|e|
+                anyhow!("Gemini 文本帧不是有效 JSON（行 {}，列 {}）", e.line(), e.column()))?)
+        }
+        Message::Binary(bytes) => {
+            if bytes.len() > MAX_SERVER_MESSAGE_BYTES { return Err(anyhow!("Gemini 二进制帧超过大小限制")); }
+            ("二进制", serde_json::from_slice(&bytes).map_err(|e|
+                anyhow!("Gemini 二进制帧不是有效 JSON（行 {}，列 {}）", e.line(), e.column()))?)
+        }
         Message::Close(frame) => return Ok(ServerFrame::Close {
             code: frame.as_ref().map(|f| u16::from(f.code)),
             hint: frame.as_ref().and_then(|f| safe_error_hint(&f.reason)),
@@ -254,8 +267,6 @@ pub fn decode_server_frame(message: Message) -> Result<ServerFrame> {
         Message::Pong(_) => return Ok(ServerFrame::Control("Pong")),
         Message::Frame(_) => return Ok(ServerFrame::Control("其他控制帧")),
     };
-    let value: Value = serde_json::from_str(&data).map_err(|e|
-        anyhow!("Gemini {kind} 帧不是有效 JSON（行 {}，列 {}）", e.line(), e.column()))?;
     if !value.is_object() { return Err(anyhow!("Gemini {kind} 帧的 JSON 顶层不是对象")); }
     Ok(ServerFrame::Data { kind, value })
 }
@@ -324,10 +335,14 @@ fn interaction_status(v: Option<&Value>) -> Option<InteractionStatus> {
         _ => None,
     }
 }
-fn transcription(v: Option<&Value>) -> Option<(String, bool)> {
-    let v = v?; let text = v.get("text")?.as_str()?.to_owned();
+fn transcription(v: Option<&Value>) -> Result<Option<(String, bool)>> {
+    let Some(v) = v else { return Ok(None); };
+    let Some(text) = v.get("text").and_then(Value::as_str) else { return Ok(None); };
+    if text.len() > MAX_TRANSCRIPT_BYTES {
+        return Err(anyhow!("Gemini 转写文本超过大小限制"));
+    }
     let finished = v.get("finished").and_then(Value::as_bool).unwrap_or(false);
-    Some((text, finished))
+    Ok(Some((text.to_owned(), finished)))
 }
 #[cfg(test)]
 pub fn parse_server_message(text: &str) -> Result<ParsedMessage> {
@@ -345,19 +360,27 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
     };
     if let Some(c) = field(root, "serverContent", "server_content") {
         p.interaction_status = interaction_status(field(c, "interactionStatus", "interaction_status")).or(p.interaction_status);
-        p.input = transcription(field(c, "inputTranscription", "input_transcription"));
-        p.interim_input = transcription(field(c, "interimInputTranscription", "interim_input_transcription"));
-        p.output = transcription(field(c, "outputTranscription", "output_transcription"));
+        p.input = transcription(field(c, "inputTranscription", "input_transcription"))?;
+        p.interim_input = transcription(field(c, "interimInputTranscription", "interim_input_transcription"))?;
+        p.output = transcription(field(c, "outputTranscription", "output_transcription"))?;
         p.interrupted = c.get("interrupted").and_then(Value::as_bool).unwrap_or(false);
         p.turn_complete = field(c,"turnComplete","turn_complete").and_then(Value::as_bool).unwrap_or(false);
         if let Some(parts) = field(c,"modelTurn","model_turn").and_then(|v| v.get("parts")).and_then(Value::as_array) {
+            let mut audio_bytes = 0usize;
             for part in parts {
                 if let Some(inline) = field(part,"inlineData","inline_data") {
                     if let Some(encoded) = inline.get("data").and_then(Value::as_str) {
                         let mime = field(inline,"mimeType","mime_type").and_then(Value::as_str).unwrap_or("audio/pcm;rate=24000");
                         if mime.starts_with("audio/pcm") {
                             if mime.contains("rate=") && !mime.contains("rate=24000") { return Err(anyhow!("不支持的 Gemini 输出采样率（需要 24000 Hz）")); }
-                            p.audio.push(STANDARD.decode(encoded).map_err(|_| anyhow!("Gemini 音频 Base64 无效"))?);
+                            // Bound encoded input before allocating its decoded form.
+                            if encoded.len() > (MAX_AUDIO_BYTES_PER_MESSAGE / 3 + 1) * 4 {
+                                return Err(anyhow!("Gemini 音频消息超过大小限制"));
+                            }
+                            let decoded = STANDARD.decode(encoded).map_err(|_| anyhow!("Gemini 音频 Base64 无效"))?;
+                            audio_bytes = audio_bytes.checked_add(decoded.len()).ok_or_else(|| anyhow!("Gemini 音频消息超过大小限制"))?;
+                            if audio_bytes > MAX_AUDIO_BYTES_PER_MESSAGE { return Err(anyhow!("Gemini 音频消息超过大小限制")); }
+                            p.audio.push(decoded);
                         }
                     }
                 }
@@ -624,6 +647,20 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
         assert_eq!(p.input.unwrap().0, "hello"); assert_eq!(p.output.unwrap().0,"你好");
         assert_eq!(p.audio, vec![vec![1,2],vec![3,4]]);
     }
+    #[test]
+    fn rejects_oversized_transcripts_audio_and_frames() {
+        let transcript = "x".repeat(MAX_TRANSCRIPT_BYTES + 1);
+        let value = json!({"serverContent":{"inputTranscription":{"text": transcript}}});
+        assert!(parse_server_value(&value).unwrap_err().to_string().contains("转写文本超过"));
+
+        let encoded = "A".repeat((MAX_AUDIO_BYTES_PER_MESSAGE / 3 + 1) * 4 + 1);
+        let value = json!({"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":encoded}}]}}});
+        assert!(parse_server_value(&value).unwrap_err().to_string().contains("音频消息超过"));
+
+        let oversized = format!("{{\"padding\":\"{}\"}}", "x".repeat(MAX_SERVER_MESSAGE_BYTES));
+        assert!(decode_server_frame(Message::Text(oversized.into())).is_err());
+    }
+
     #[test] fn audio_frame_is_pcm_base64_and_stream_end_is_explicit() {
         let frame = audio_frame(&[1, 2, 3, 4]).into_text().unwrap();
         let v: Value = serde_json::from_str(&frame).unwrap();

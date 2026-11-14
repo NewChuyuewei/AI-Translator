@@ -63,10 +63,10 @@ impl Resampler {
     pub fn new(from: u32, to: u32) -> Self {
         Self { from: from.max(1), to: to.max(1), position: 0.0, input: VecDeque::new(), lowpass: 0.0 }
     }
-    pub fn push(&mut self, mono: &[f32]) -> Vec<f32> {
+    fn push_samples(&mut self, samples: impl Iterator<Item = f32>) -> Vec<f32> {
         let cutoff = (self.to as f32 * 0.45).min(self.from as f32 * 0.45);
         let a = (std::f32::consts::TAU * cutoff / (self.from as f32 + std::f32::consts::TAU * cutoff)).clamp(0.0, 1.0);
-        for &s in mono {
+        for s in samples {
             let s = if s.is_finite() { s.clamp(-1.0, 1.0) } else { 0.0 };
             if self.from > self.to { self.lowpass += a * (s - self.lowpass); self.input.push_back(self.lowpass); }
             else { self.input.push_back(s); }
@@ -84,10 +84,15 @@ impl Resampler {
         self.position -= consumed as f64;
         result
     }
-}
-fn downmix(data: &[f32], channels: u16) -> Vec<f32> {
-    let n = usize::from(channels.max(1));
-    data.chunks_exact(n).map(|x| x.iter().copied().sum::<f32>() / n as f32).collect()
+    pub fn push(&mut self, mono: &[f32]) -> Vec<f32> {
+        self.push_samples(mono.iter().copied())
+    }
+    fn push_interleaved(&mut self, data: &[f32], channels: u16) -> Vec<f32> {
+        let channels = usize::from(channels.max(1));
+        self.push_samples(data.chunks_exact(channels).map(|frame|
+            frame.iter().copied().sum::<f32>() / channels as f32
+        ))
+    }
 }
 fn trim(q: &mut VecDeque<f32>) {
     if q.len() > MAX_BUFFERED_SAMPLES { q.drain(..q.len()-MAX_BUFFERED_SAMPLES); }
@@ -137,7 +142,7 @@ fn process_audio(mode: AudioSourceMode, rx: Receiver<RawAudio>, tx: mpsc::Sender
                 *slot = Some((chunk.sample_rate, Resampler::new(chunk.sample_rate, SAMPLE_RATE)));
             }
             if let Some((_, resampler)) = slot {
-                queue.extend(resampler.push(&downmix(&chunk.data, chunk.channels))); trim(queue);
+                queue.extend(resampler.push_interleaved(&chunk.data, chunk.channels)); trim(queue);
             }
         }
         if Instant::now() >= next {
@@ -179,7 +184,7 @@ impl AudioRouter {
         Self { raw_sender, stop, threads: vec![worker] }
     }
     #[cfg(not(target_os = "android"))]
-    pub fn start_desktop(&mut self, config: AudioConfig, errors: mpsc::UnboundedSender<String>) -> Result<()> {
+    pub fn start_desktop(&mut self, config: AudioConfig, errors: mpsc::Sender<String>) -> Result<()> {
         let raw = self.raw_sender.clone(); let stopping = self.stop.clone();
         let (ready_tx, ready_rx) = bounded::<Result<()>>(1);
         let worker = thread::spawn(move || {
@@ -241,7 +246,7 @@ mod desktop {
             None => host.default_output_device().ok_or_else(|| anyhow!("没有默认系统输出设备")),
         }
     }
-    fn open_cpal(device: cpal::Device, output_endpoint: bool, source: Source, raw: Sender<RawAudio>, errors: mpsc::UnboundedSender<String>) -> Result<cpal::Stream> {
+    fn open_cpal(device: cpal::Device, output_endpoint: bool, source: Source, raw: Sender<RawAudio>, errors: mpsc::Sender<String>) -> Result<cpal::Stream> {
         let supported = if output_endpoint { device.default_output_config()? } else { device.default_input_config()? };
         let format = supported.sample_format(); let rate = supported.sample_rate().0; let channels = supported.channels();
         let config = supported.config();
@@ -252,7 +257,7 @@ mod desktop {
                     move |data: &[$t], _| {
                         let samples: Vec<f32> = data.iter().map($f).collect();
                         let _ = raw.try_send(RawAudio { source, sample_rate: rate, channels, data: samples });
-                    }, move |e| { let _ = err.send(format!("音频采集失败: {e}")); }, None)?
+                    }, move |e| { let _ = err.try_send(format!("音频采集失败: {e}")); }, None)?
             }};
         }
         // On Windows, CPAL opens input on a render endpoint using WASAPI loopback.
@@ -267,7 +272,7 @@ mod desktop {
         };
         stream.play().context("启动音频采集失败")?; Ok(stream)
     }
-    pub fn open_streams(config: &AudioConfig, raw: &Sender<RawAudio>, errors: &mpsc::UnboundedSender<String>) -> Result<Streams> {
+    pub fn open_streams(config: &AudioConfig, raw: &Sender<RawAudio>, errors: &mpsc::Sender<String>) -> Result<Streams> {
         let mut streams = Vec::new();
         if config.mode.wants_mic() {
             streams.push(open_cpal(input_device(config.microphone_device.as_deref())?, false, Source::Mic, raw.clone(), errors.clone())?);

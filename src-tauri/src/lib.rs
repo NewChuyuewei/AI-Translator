@@ -48,6 +48,15 @@ impl StartOptions {
     fn audio(&self) -> AudioConfig { AudioConfig { mode: self.mode, microphone_device: self.microphone_device.clone(), system_device: self.system_device.clone() } }
     fn validate(&self) -> Result<()> {
         self.gemini().validate()?;
+        checked_overlay_scale(self.overlay_scale)?;
+        if self.proxy_url.len() > 2048 || self.proxy_url.chars().any(char::is_control) {
+            return Err(anyhow!("代理地址过长或含控制字符"));
+        }
+        for name in [&self.microphone_device, &self.system_device, &self.playback_device].into_iter().flatten() {
+            if name.len() > 1024 || name.chars().any(char::is_control) {
+                return Err(anyhow!("音频设备名称过长或含控制字符"));
+            }
+        }
         if self.model.is_transcription_only() && self.playback_enabled {
             return Err(anyhow!("实时转写模型不输出译音，请关闭译音播放"));
         }
@@ -62,6 +71,7 @@ const SECRETS_FILE: &str = "secrets.enc.json";
 const SECRET_AAD: &[u8] = b"com.gemini.live.translator/secrets/v1";
 const PBKDF2_ITERATIONS: u32 = 210_000;
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +110,9 @@ fn config_path(app: &AppHandle, name: &str) -> Result<PathBuf> {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    // Tauri commands may run concurrently. Serialize the shared temporary-file
+    // name so simultaneous settings/vault writes cannot truncate each other.
+    let _write_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let parent = path.parent().ok_or_else(|| anyhow!("应用配置目录无效"))?;
     fs::create_dir_all(parent).context("无法创建应用配置目录")?;
     #[cfg(unix)]
@@ -292,7 +305,7 @@ fn resize_overlay(app: &AppHandle, scale: f64) -> Result<()> {
 }
 fn publish(app: &AppHandle, status: &Status) { let _ = app.emit("session-status", status.clone()); }
 fn set_phase(app: &AppHandle, generation: u64, phase: &str, message: &str) {
-    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap();
+    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if inner.generation != generation { return; }
     // Stop requested while a setup callback was in flight: don't flip back to running.
     if inner.status.phase == "stopping" && phase == "running" { return; }
@@ -300,7 +313,7 @@ fn set_phase(app: &AppHandle, generation: u64, phase: &str, message: &str) {
     let status = inner.status.clone(); drop(inner); publish(app, &status);
 }
 fn set_network_route(app: &AppHandle, generation: u64, route: &str) {
-    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap();
+    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if inner.generation != generation || inner.status.phase != "connecting" { return; }
     inner.status.network_route = route.into();
     let status = inner.status.clone(); drop(inner); publish(app, &status);
@@ -313,7 +326,7 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
     }
     let controller = app.state::<Controller>();
     let (cancel_rx, generation, status) = {
-        let mut inner = controller.0.lock().unwrap();
+        let mut inner = controller.0.lock().unwrap_or_else(|e| e.into_inner());
         if matches!(inner.status.phase.as_str(), "connecting"|"running"|"stopping") { return Err(anyhow!("语音会话已经启动或正在停止")); }
         let (tx, rx) = watch::channel(false);
         inner.generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed); inner.cancel = Some(tx); inner.last = Some(options.clone());
@@ -335,7 +348,7 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
         if requested_stop || result.is_ok() { trace.info("会话已停止"); }
         else { trace.error("会话结束：发生错误；请查看前面的阶段记录及界面提示"); }
         let controller = app.state::<Controller>();
-        let mut inner = controller.0.lock().unwrap();
+        let mut inner = controller.0.lock().unwrap_or_else(|e| e.into_inner());
         if inner.generation == generation {
             inner.cancel = None;
             if requested_stop || result.is_ok() {
@@ -351,7 +364,7 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
     Ok(())
 }
 fn stop_session(app: &AppHandle) {
-    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap();
+    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(cancel) = &inner.cancel {
         let _ = cancel.send(true); inner.status.phase = "stopping".into(); inner.status.message = "正在停止并释放音频…".into();
         #[cfg(target_os="android")] let generation = inner.generation;
@@ -365,7 +378,7 @@ fn stop_session(app: &AppHandle) {
     }
 }
 fn toggle_session(app: &AppHandle) {
-    let state = app.state::<Controller>(); let inner = state.0.lock().unwrap();
+    let state = app.state::<Controller>(); let inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if inner.cancel.is_some() { drop(inner); stop_session(app); return; }
     let previous = inner.last.clone(); drop(inner);
     if let Some(options) = previous {
@@ -374,7 +387,7 @@ fn toggle_session(app: &AppHandle) {
 }
 
 #[tauri::command] fn list_audio_devices() -> Result<audio_router::AudioDevices, String> { audio_router::list_devices().map_err(|e| format!("{e:#}")) }
-#[tauri::command] fn get_status(state: tauri::State<'_, Controller>) -> Status { state.0.lock().unwrap().status.clone() }
+#[tauri::command] fn get_status(state: tauri::State<'_, Controller>) -> Status { state.0.lock().unwrap_or_else(|e| e.into_inner()).status.clone() }
 #[tauri::command] fn get_diagnostics(state: tauri::State<'_, LogStore>) -> Vec<LogEntry> { state.snapshot() }
 #[tauri::command] fn clear_diagnostics(state: tauri::State<'_, LogStore>) -> u64 { state.clear() }
 #[tauri::command]
@@ -392,7 +405,7 @@ fn get_saved_settings(app: AppHandle, state: tauri::State<'_, Controller>) -> Re
     if let Some(settings) = &saved {
         let transcription_only = settings.options.model.is_transcription_only();
         let overlay_scale = settings.options.overlay_scale;
-        let mut inner = state.0.lock().unwrap();
+        let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
         inner.last = Some(settings.options.clone());
         let mode_changed = inner.cancel.is_none()
             && matches!(inner.status.phase.as_str(), "idle" | "error")
@@ -415,7 +428,7 @@ fn get_saved_settings(app: AppHandle, state: tauri::State<'_, Controller>) -> Re
 #[tauri::command]
 fn unlock_saved_secrets(app: AppHandle, state: tauri::State<'_, Controller>, password: String) -> Result<SecretPayload, String> {
     let payload = read_encrypted_secrets(&app, &password).map_err(|e| format!("{e:#}"))?;
-    let mut inner = state.0.lock().unwrap();
+    let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(options) = &mut inner.last {
         options.api_key = payload.api_key.clone();
         options.proxy_url = payload.proxy_url.clone();
@@ -442,7 +455,7 @@ fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, mut op
     let persisted = settings_for_storage(&options, save_sensitive);
     write_settings(&app, &persisted).map_err(|e| format!("{e:#}"))?;
     let transcription_only = options.model.is_transcription_only();
-    let mut inner = state.0.lock().unwrap();
+    let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     // Editing ordinary preferences before unlocking must not erase secrets
     // already held in this process (for example after using F8).
     if save_sensitive && options.api_key.is_empty() {
@@ -470,7 +483,7 @@ fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, mut op
 fn set_overlay_scale(app: AppHandle, state: tauri::State<'_, Controller>, scale: f64) -> Result<(), String> {
     let scale = checked_overlay_scale(scale).map_err(|e| e.to_string())?;
     resize_overlay(&app, scale).map_err(|e| format!("{e:#}"))?;
-    let mut inner = state.0.lock().unwrap();
+    let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     inner.status.overlay_scale = scale;
     if let Some(options) = &mut inner.last { options.overlay_scale = scale; }
     let status = inner.status.clone();
@@ -490,7 +503,7 @@ async fn set_overlay_locked(app: AppHandle, locked: bool) -> Result<(), String> 
         let cloned = app.clone();
         tokio::task::spawn_blocking(move || tauri_plugin_mobile_audio::set_editable(&cloned, !locked)).await.map_err(|e| e.to_string())??;
     }
-    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap(); inner.status.overlay_locked = locked;
+    let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner()); inner.status.overlay_locked = locked;
     let status = inner.status.clone(); drop(inner); publish(&app,&status); Ok(())
 }
 #[tauri::command]
@@ -543,7 +556,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
     // Six 40 ms frames absorb transient network jitter while capping queued
     // audio at 240 ms. Older speech is less useful than bounded latency.
     let (pcm_tx, mut pcm_rx) = mpsc::channel::<Vec<u8>>(6);
-    let (error_tx, mut error_rx) = mpsc::unbounded_channel::<String>();
+    let (error_tx, mut error_rx) = mpsc::channel::<String>(8);
     let mut router = AudioRouter::new(options.mode, pcm_tx, options.token_saver);
 
     #[cfg(not(target_os="android"))]
@@ -571,7 +584,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
                         let data = samples.into_iter().map(|s| s as f32 / 32768.0).collect();
                         let _ = raw.try_send(RawAudio { source:if system { Source::System } else { Source::Mic }, sample_rate, channels:1, data });
                     }
-                    Ok(tauri_plugin_mobile_audio::NativeMessage::Error(e)) => { let _ = err.send(e); }
+                    Ok(tauri_plugin_mobile_audio::NativeMessage::Error(e)) => { let _ = err.try_send(e); }
                     Err(_) => {}
                 }
             }
@@ -773,7 +786,7 @@ pub fn run() {
                 if shortcut == &f8 && event.state() == ShortcutState::Pressed { toggle_session(app); }
             }).build())?;
             let registered = _app.global_shortcut().register(f8).is_ok();
-            let state = _app.state::<Controller>(); state.0.lock().unwrap().status.shortcut_available = registered;
+            let state = _app.state::<Controller>(); state.0.lock().unwrap_or_else(|e| e.into_inner()).status.shortcut_available = registered;
             if let Some(window) = _app.get_webview_window("main") { let _ = window.set_ignore_cursor_events(true); }
         }
         Ok(())
@@ -876,6 +889,23 @@ mod tests {
         o.playback_enabled = false;
         assert!(o.validate().is_ok());
         o.bidirectional = true;
+        assert!(o.validate().is_err());
+    }
+
+    #[test]
+    fn start_options_bound_untrusted_ipc_strings() {
+        let mut o: StartOptions = serde_json::from_value(serde_json::json!({
+            "apiKey":"test", "model":"general_live", "targetLanguage":"zh",
+            "mode":"microphone_only", "proxyMode":"auto"
+        })).unwrap();
+        assert!(o.validate().is_ok());
+        o.proxy_url = "x".repeat(2049);
+        assert!(o.validate().is_err());
+        o.proxy_url.clear();
+        o.microphone_device = Some("invalid\ndevice".into());
+        assert!(o.validate().is_err());
+        o.microphone_device = None;
+        o.overlay_scale = 2.0;
         assert!(o.validate().is_err());
     }
 }

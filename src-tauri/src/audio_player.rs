@@ -12,8 +12,10 @@ pub struct AudioPlayer {
     queue: Arc<Mutex<VecDeque<f32>>>, epoch: Arc<AtomicU64>,
 }
 impl AudioPlayer {
-    pub fn start(device_name: Option<String>, errors: mpsc::UnboundedSender<String>) -> Result<Self> {
-        let (tx, rx) = bounded::<Command>(48); let (ready_tx, ready_rx) = bounded::<Result<()>>(1);
+    pub fn start(device_name: Option<String>, errors: mpsc::Sender<String>) -> Result<Self> {
+        // Keep command backlog short: translated speech that is already late is
+        // less useful than dropping it and returning to real-time playback.
+        let (tx, rx) = bounded::<Command>(12); let (ready_tx, ready_rx) = bounded::<Result<()>>(1);
         let queue = Arc::new(Mutex::new(VecDeque::<f32>::new())); let worker_queue = queue.clone();
         let epoch = Arc::new(AtomicU64::new(0)); let worker_epoch = epoch.clone();
         let worker = thread::spawn(move || {
@@ -36,7 +38,7 @@ impl AudioPlayer {
                                     for value in frame { *value = ($convert)(sample); }
                                 }
                             } else { output.fill($silence); }
-                        }, move |e| { let _ = err.send(format!("译音播放失败: {e}")); }, None)?
+                        }, move |e| { let _ = err.try_send(format!("译音播放失败: {e}")); }, None)?
                     }};
                 }
                 let stream = match supported.sample_format() {
@@ -64,7 +66,9 @@ impl AudioPlayer {
                         if let Ok(mut q) = queue.lock() {
                             if epoch != worker_epoch.load(Ordering::Acquire) { continue; }
                             q.extend(output);
-                            let max = (rate as usize) * 2;
+                            // Cap device-side latency at 480 ms. Discarding the
+                            // oldest translated audio preserves conversational sync.
+                            let max = (rate as usize) * 12 / 25;
                             if q.len() > max { let count = q.len() - max; q.drain(..count); }
                         }
                     }
