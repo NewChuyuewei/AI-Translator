@@ -16,6 +16,7 @@ const output = [];
 const suppressionComments = new Set([
   '# Tauri 2 currently requires AGP legacy Kotlin/new-DSL compatibility flags.',
   '# Suppress only those known upstream migration warnings; do not hide other warnings.',
+  '# The managed AGP enum stops at 24; the Kotlin 2.4 compiler receives target 25 directly.',
 ]);
 
 for (const line of current.split(/\r?\n/)) {
@@ -27,7 +28,8 @@ for (const line of current.split(/\r?\n/)) {
     // packaging errors and is unsupported in AGP 10.
     continue;
   }
-  if (line.startsWith('android.javaCompile.suppressSourceTargetDeprecationWarning=')) {
+  if (line.startsWith('android.javaCompile.suppressSourceTargetDeprecationWarning=') ||
+      line.startsWith('kotlin.jvm.target.validation.mode=')) {
     continue;
   }
   if (line.startsWith('android.sync.suppressAgpWarnings=')) {
@@ -45,6 +47,8 @@ output.push(
   '# Tauri 2 currently requires AGP legacy Kotlin/new-DSL compatibility flags.',
   '# Suppress only those known upstream migration warnings; do not hide other warnings.',
   'android.javaCompile.suppressSourceTargetDeprecationWarning=true',
+  '# The managed AGP enum stops at 24; the Kotlin 2.4 compiler receives target 25 directly.',
+  'kotlin.jvm.target.validation.mode=ignore',
   `android.sync.suppressAgpWarnings=${[...suppressions].sort().join(',')}`,
   '',
 );

@@ -76,6 +76,7 @@ try {
   assert.match(configured, /^android\.builtInKotlin=false$/m);
   assert.match(configured, /^android\.newDsl=false$/m);
   assert.match(configured, /^android\.javaCompile\.suppressSourceTargetDeprecationWarning=true$/m);
+  assert.match(configured, /^kotlin\.jvm\.target\.validation\.mode=ignore$/m);
   assert.match(configured, /^android\.sync\.suppressAgpWarnings=DEPRECATED_DSL,EXISTING_WARNING,JAVA_COMPILE_DEPRECATED_SOURCE_TARGET,UNSUPPORTED_PROJECT_OPTION_USE$/m);
   const rootScript = fs.readFileSync(rootBuild, 'utf8');
   assert.match(rootScript, /com\.android\.tools\.build:gradle:9\.4\.1/);

@@ -17,7 +17,7 @@ Audited on 2026-11-14. The project follows the latest **stable** releases where 
 | CI runners | Ubuntu 24.04, Windows Server 2022, macOS 26 ARM64; Node 24, JDK 25, Rust stable |
 | Actions | checkout v7, setup-node v7, setup-java v6, upload-artifact v7, download-artifact v8, setup-android v4, rust-cache v2 |
 
-> **Java 25 Android policy:** Tauri 2.12.5 generates AGP 9.3.1, Gradle 9.6.1, and Kotlin Gradle Plugin 2.2.10; that classloader only supports JVM targets through 24. Post-generation configuration upgrades all three to stable AGP 9.4.1, Gradle 9.9.1, and Kotlin 2.4.21, then passes `-jvm-target 25` directly through `freeCompilerArgs` to avoid AGP's stale `JvmTarget` enum while emitting Java/Kotlin 25 bytecode. D8/R8 still must prove class-file version 69 support in the native Android job and on API 26 hardware.
+> **Java 25 Android policy:** Tauri 2.12.5 generates AGP 9.3.1, Gradle 9.6.1, and Kotlin Gradle Plugin 2.2.10; that classloader only supports JVM targets through 24. Post-generation configuration upgrades all three to stable AGP 9.4.1, Gradle 9.9.1, and Kotlin 2.4.21, then passes `-jvm-target 25` directly through `freeCompilerArgs` to avoid AGP's stale `JvmTarget` enum. The obsolete enum-based consistency check is disabled, and CI instead verifies class-file major version 69 for app and plugin Kotlin output before accepting the APK. D8/R8 and API 26 hardware still must prove runtime support.
 
 `Cargo.lock` remains the reproducible source of exact transitive Rust versions. Direct dependency lower bounds are aligned with the locked, tested stable line rather than left at broad historical minimums.
 
