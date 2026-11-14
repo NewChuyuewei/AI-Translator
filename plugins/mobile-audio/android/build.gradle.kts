@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
@@ -21,12 +22,11 @@ extensions.configure<LibraryExtension> {
     }
 }
 
-// AGP 9.3.1 exposes its embedded Kotlin 2.2 JvmTarget class to build scripts,
-// so linking the Kotlin 2.4-only JVM_25 enum field fails at runtime. The string
-// compatibility API still passes target 25 to the Kotlin 2.4 compiler.
+// Stable AGP 9.4.1, Gradle 9.9.1, and Kotlin 2.4.21 share the JVM 25 API.
 tasks.withType<KotlinCompile>().configureEach {
-    @Suppress("DEPRECATION", "DEPRECATION_ERROR")
-    kotlinOptions.jvmTarget = "25"
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_25)
+    }
 }
 
 dependencies {

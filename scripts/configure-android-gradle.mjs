@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const AGP_VERSION = '9.4.1';
+const GRADLE_VERSION = '9.9.1';
 const KOTLIN_VERSION = '2.4.21';
 const propertiesPath = process.argv[2] || 'src-tauri/gen/android/gradle.properties';
 const current = fs.readFileSync(propertiesPath, 'utf8');
@@ -52,14 +54,29 @@ const androidRoot = path.dirname(path.resolve(propertiesPath));
 const rootBuild = path.join(androidRoot, 'build.gradle.kts');
 if (fs.existsSync(rootBuild)) {
   const buildScript = fs.readFileSync(rootBuild, 'utf8');
-  const modern = buildScript.replace(
-    /org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+/,
-    `org.jetbrains.kotlin:kotlin-gradle-plugin:${KOTLIN_VERSION}`,
-  );
-  if (modern === buildScript && !buildScript.includes(`kotlin-gradle-plugin:${KOTLIN_VERSION}`)) {
+  const modern = buildScript
+    .replace(/com\.android\.tools\.build:gradle:[^"]+/, `com.android.tools.build:gradle:${AGP_VERSION}`)
+    .replace(
+      /org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+/,
+      `org.jetbrains.kotlin:kotlin-gradle-plugin:${KOTLIN_VERSION}`,
+    );
+  if (!modern.includes(`com.android.tools.build:gradle:${AGP_VERSION}`)) {
+    throw new Error(`Could not update the generated Android Gradle plugin in ${rootBuild}`);
+  }
+  if (!modern.includes(`kotlin-gradle-plugin:${KOTLIN_VERSION}`)) {
     throw new Error(`Could not update the generated Kotlin Gradle plugin in ${rootBuild}`);
   }
   fs.writeFileSync(rootBuild, modern);
+}
+
+const wrapperProperties = path.join(androidRoot, 'gradle', 'wrapper', 'gradle-wrapper.properties');
+if (fs.existsSync(wrapperProperties)) {
+  const wrapper = fs.readFileSync(wrapperProperties, 'utf8');
+  const modern = wrapper.replace(/gradle-[0-9.]+-bin\.zip/, `gradle-${GRADLE_VERSION}-bin.zip`);
+  if (!modern.includes(`gradle-${GRADLE_VERSION}-bin.zip`)) {
+    throw new Error(`Could not update the generated Gradle wrapper in ${wrapperProperties}`);
+  }
+  fs.writeFileSync(wrapperProperties, modern);
 }
 
 const appBuild = path.join(androidRoot, 'app', 'build.gradle.kts');
@@ -77,12 +94,12 @@ if (fs.existsSync(appBuild)) {
     .replace(/\n\s*kotlin\s*\{\s*compilerOptions\s*\{\s*jvmTarget\s*=\s*(?:org\.jetbrains\.kotlin\.gradle\.dsl\.)?JvmTarget\.JVM_(?:1_8|17)\s*\}\s*\}/g, '')
     .replace(/\n\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*"(?:1\.8|17)"\s*\}/g, '')
     .replace(/\n\s*kotlinOptions\.jvmTarget\s*=\s*"(?:1\.8|17)"/g, '');
-  if (!modern.includes('kotlinOptions.jvmTarget = "25"')) {
-    modern += `${newline}${newline}// AGP 9.3.1 exposes its embedded Kotlin 2.2 JvmTarget class to build scripts.${newline}` +
-      `// Avoid linking the Kotlin 2.4-only JVM_25 field while still passing target 25.${newline}` +
+  if (!modern.includes('JvmTarget.JVM_25')) {
+    modern += `${newline}${newline}// Stable AGP ${AGP_VERSION}, Gradle ${GRADLE_VERSION}, and Kotlin ${KOTLIN_VERSION} share the JVM 25 API.${newline}` +
       `tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {${newline}` +
-      `    @Suppress("DEPRECATION", "DEPRECATION_ERROR")${newline}` +
-      `    kotlinOptions.jvmTarget = "25"${newline}` +
+      `    compilerOptions {${newline}` +
+      `        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)${newline}` +
+      `    }${newline}` +
       `}${newline}`;
   }
   fs.writeFileSync(appBuild, modern);
