@@ -2,7 +2,7 @@
 
 > **版权声明**：Copyright © 2026 chuyuewei. All rights reserved. 本软件及项目所有者创作的源代码、界面设计、文档和发布产物归 chuyuewei 所有；未经事先书面许可，不得复制、修改、再分发、出售或用于其他商业产品。第三方组件、服务及商标仍归各自权利人所有并适用其各自许可。完整声明见 [`COPYRIGHT`](COPYRIGHT)。
 
-Tauri 2 + Rust 的实时语音翻译与转写**开发原型**：支持麦克风、系统播放音频和两者混合，向 Gemini Live 发送音频。翻译模型显示原文／译文并可选播放译音；转写模型只显示原文。桌面端有控制面板和置顶透明字幕窗；Android 使用原生 Kotlin 前台采集服务和可选的系统悬浮字幕。Android 正分阶段迁移为 Kotlin + Jetpack Compose UI，并保留 Rust 安全核心，计划见 [`docs/ANDROID_KOTLIN_MIGRATION.md`](docs/ANDROID_KOTLIN_MIGRATION.md)。
+Tauri 2 + Rust 的实时语音翻译与转写**开发原型**：支持麦克风、系统播放音频和两者混合，向 Gemini Live 发送音频。翻译模型显示原文／译文并可选播放译音；转写模型只显示原文。桌面端有控制面板和置顶透明字幕窗；Android 使用原生 Kotlin 前台采集服务和可选的系统悬浮字幕。Android 正重写为完全独立的 Kotlin + JDK 25 + Jetpack Compose 应用，不复用 Rust/JNI，计划见 [`docs/ANDROID_KOTLIN_MIGRATION.md`](docs/ANDROID_KOTLIN_MIGRATION.md)。
 
 > **验证范围**：这是开发原型，开发环境没有真实 Gemini API Key，也没有 Windows、macOS 或 Android 真机；新模型、系统代理、音频和界面尚未完成真实服务端及目标设备端到端验证，不承诺任意网络或音频来源均可用。
 >
@@ -172,48 +172,31 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 ### GitHub Actions 自动构建与发布
 
 - `.github/workflows/ci.yml`：推送到 `main`／`arena/**`、Pull Request 或手动触发时，执行前端构建、JSDOM 测试和锁定依赖的 Rust 单元测试。
-- `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK。手动运行可选择 `build_only`（只保留 Actions 构建产物）、`prerelease`（发布 GitHub 预发布）或 `release`（发布正式版本）；推送标签默认发布正式版本。发布模式会在全部平台成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
+- `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及原生 Kotlin Android debug APK。手动运行可选择 `build_only`（只保留 Actions 构建产物）、`prerelease`（发布 GitHub 预发布）或 `release`（发布正式版本）；推送标签默认发布正式版本。发布模式会在全部平台成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
 
 当前源码基准版本为 `1.0.0`。手动运行默认选择安全的 `build_only`，不会创建 GitHub Release；确认产物后可用同一版本选择预发布或正式发布。发布工作流支持自定义严格三段式版本：在 Actions 手动运行时填写 `vMAJOR.MINOR.PATCH`（例如 `v1.0.1`），工作流会在各个隔离的构建任务中运行 `node scripts/set-version.mjs MAJOR.MINOR.PATCH`，同步 npm、Cargo、Tauri、Android、NSIS 和便携版产物版本；不会把临时版本改写提交回仓库。也可以推送同格式标签触发。正式源码升级可在本地运行该脚本后提交。预发布后缀目前不支持，以免生成无效的 Windows 四段数字版本资源。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
 
 ## Android 构建与安装
 
-当前源码版本为 **1.0.0**；发布工作流生成仅含 `arm64-v8a` 的 Android debug APK，最低 Android 8.0/API 26，系统音频捕获需要 Android 10/API 29 及以上。APK 的实际 `versionCode` 由当前 Tauri Android 模板生成，应以构建产物清单为准。调试签名可能随构建环境变化；签名不同的 APK 无法覆盖安装，卸载会删除应用数据。
+Android 已迁移到独立的 `android/` 原生工程：完全使用 Kotlin、Jetpack Compose 和 JDK 25，不加载 Tauri/WebView，也不链接 Rust/JNI。稳定工具链为 AGP 9.4.1、Gradle 9.9.1、Kotlin 2.4.21、compile/target SDK 37；Java source/target 与 Kotlin JVM target 均为 25。CI 已成功构建 debug APK，并检查代表性 Kotlin class 的 major version 为 69。
 
-**重要：0.1.3 在部分 Android 15+ 手机上启动即闪退的原因尚未知；当前 1.0.0 源码未在这些手机上验证，也不能保证解决。**建议保留旧版和相关数据，并提供脱敏后的系统崩溃堆栈供进一步排查。
+当前原生版本已实现 Compose 控制／字幕界面、Android Keystore 密钥加密、Gemini WebSocket、麦克风 40 ms PCM 上传及有界低延迟队列。MediaProjection 系统音频、前台服务、译音播放、悬浮字幕和真机验证仍在迁移中，因此目前 APK 仍是开发包。旧版 0.1.3 在部分 Android 15+ 设备上的闪退不能视为已由新工程完成真机验证。
 
-这是开发用 debug 包，可调试且允许明文网络流量配置，不应用于正式发布。Gemini 音频连接本身使用加密 WSS。源码包不包含调试 keystore：自行在另一台电脑构建的 APK 通常会使用不同的签名，因而可能无法覆盖此前安装的版本。
-
-源码包不包含生成目录 `src-tauri/gen/`、已下载的 SDK/NDK、`node_modules/` 或构建产物；这些要在本机生成。Actions 初始化工程后会运行 `scripts/configure-android-gradle.mjs`：删除已弃用且降低校验强度的 `android.proguard.failOnMissingFiles=false`，将生成应用的 `android {}` 迁移到公开 `ApplicationExtension`，并仅抑制 Tauri 2 当前仍需要的 AGP 兼容选项／旧 variant DSL 迁移提示，不会全局关闭 Gradle 或 Kotlin 警告。项目自己的 mobile-audio 插件已改用公开 `LibraryExtension` 和类型安全的 Kotlin `compilerOptions`。GitHub Actions 使用 JDK 25 运行 Gradle；初始化后会把 Tauri 模板自带的 Kotlin Gradle Plugin 2.2.10 升级到稳定版 2.4.21（该版本提供 `JvmTarget.JVM_25`），应用与插件均输出 Java/Kotlin 25 字节码。生成的 Tauri Kotlin 文件只对其文件内的旧 Android 兼容调用使用 `DEPRECATION` 豁免，项目 Kotlin 代码的其他警告仍保持可见；JDK 25 编译 Tauri 的 Java 8 兼容模块所产生的 source/target 提示按 AGP 官方属性精确抑制。Cargo 依赖内 Tauri 自身的 Kotlin 源码仍可能报告上游生命周期 API／Java 类型提示，需等待 Tauri 模板升级，项目不会修改 Cargo registry 中的第三方源码来隐藏它。准备 Android Studio、JDK 25、SDK Platform-Tools、SDK 平台、Build Tools 和 NDK。使用本项目锁定的 Tauri CLI 初始化时，本次生成的工程使用 `compileSdk/targetSdk 37`，插件使用 `compileSdk 37`；建议在 SDK Manager 中安装 API 36、37 和相应 Build Tools，以及 NDK 28.2.13676358。Android 版本号由 `src-tauri/tauri.android.conf.json` 覆盖；版本或 Tauri 模板升级后以生成工程为准。
-
-macOS / Linux 示例（按本机目录调整）：
+准备 JDK 25、Android SDK Platform 37 与 Build Tools 37.0.0，然后执行：
 
 ```bash
-export JAVA_HOME=/path/to/jdk-21
+export JAVA_HOME=/path/to/jdk-25
 export ANDROID_HOME="$HOME/Android/Sdk"
-export NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
-# 可通过 Android Studio SDK Manager 安装，或：
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-  "platform-tools" "platforms;android-36" "platforms;android-37.0" \
-  "build-tools;36.0.0" "build-tools;37.0.0" "ndk;28.2.13676358"
-rustup target add aarch64-linux-android
-npm ci
-npx tauri android init --ci
-npx tauri android build --debug --apk --target aarch64 --ci
-adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+  "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+gradle -p android testDebugUnitTest assembleDebug
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Windows PowerShell 环境变量示例（版本和路径按实际修改，随后运行同样的 `rustup`、`npm`、`npx` 和 `adb` 命令）：
+版本脚本会同步原生 Android 的 `versionName` 和 `versionCode`。debug APK 使用临时调试签名，不能作为应用商店或生产发布包；不同机器的签名可能不同，无法直接覆盖安装。正式发布必须配置并安全保管独立 release keystore。
 
-```powershell
-$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
-$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-$env:NDK_HOME = "$env:ANDROID_HOME\ndk\28.2.13676358"
-$env:PATH = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
-```
-
-`--target aarch64` 只包含 ARM64，即使输出文件名含 `universal`；其他 ABI 需安装对应 Rust target 并指定相应构建目标。调试 APK 使用调试签名，**不应作为正式发布包**。正式发布需要自行配置版本号、持久保管的 release keystore、签名与 Play 政策材料；参见 [Tauri Android 签名文档](https://v2.tauri.app/distribute/sign/android/)。每次重新生成 `gen/android` 后，针对生成工程的手工签名配置需重新应用或脚本化。
+完整迁移状态见 [`android/README.md`](android/README.md) 和 [`docs/ANDROID_KOTLIN_MIGRATION.md`](docs/ANDROID_KOTLIN_MIGRATION.md)。
 
 ## 测试与排障
 
