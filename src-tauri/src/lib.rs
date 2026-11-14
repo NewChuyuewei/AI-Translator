@@ -7,17 +7,19 @@ mod proxy;
 
 use anyhow::{anyhow, Context, Result};
 use audio_player::AudioPlayer;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use audio_router::{AudioConfig, AudioRouter, AudioSourceMode};
 use diagnostics::{LogEntry, LogStore, Trace};
 use futures_util::{SinkExt, StreamExt};
 use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, ThinkingLevel, TranscriptionMode};
 use proxy::ProxyMode;
+use ring::{aead, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
+use std::{collections::HashSet, fs, io::Write, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StartOptions {
     api_key: String, model: ModelKind, target_language: String,
@@ -46,6 +48,185 @@ impl StartOptions {
     }
     fn play_translation(&self) -> bool { self.playback_enabled && !self.model.is_transcription_only() }
 }
+
+const SETTINGS_VERSION: u8 = 2;
+const SETTINGS_FILE: &str = "settings.json";
+const SECRETS_FILE: &str = "secrets.enc.json";
+const SECRET_AAD: &[u8] = b"com.gemini.live.translator/secrets/v1";
+const PBKDF2_ITERATIONS: u32 = 210_000;
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedSettings {
+    version: u8,
+    save_sensitive: bool,
+    options: StartOptions,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecretPayload { api_key: String, proxy_url: String }
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EncryptedSecrets {
+    version: u8,
+    algorithm: String,
+    iterations: u32,
+    salt: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+fn settings_for_storage(options: &StartOptions, save_sensitive: bool) -> PersistedSettings {
+    let mut options = options.clone();
+    // Secrets never belong to the regular preferences file. The opt-in only
+    // controls whether a separate password-encrypted vault is maintained.
+    options.api_key.clear();
+    options.proxy_url.clear();
+    PersistedSettings { version: SETTINGS_VERSION, save_sensitive, options }
+}
+
+fn config_path(app: &AppHandle, name: &str) -> Result<PathBuf> {
+    Ok(app.path().app_config_dir().context("无法定位应用配置目录")?.join(name))
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| anyhow!("应用配置目录无效"))?;
+    fs::create_dir_all(parent).context("无法创建应用配置目录")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).context("无法限制应用配置目录权限")?;
+    }
+    let temporary = path.with_extension("tmp");
+    let mut open = fs::OpenOptions::new();
+    open.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        open.mode(0o600);
+    }
+    let mut file = open.open(&temporary).context("无法写入应用配置")?;
+    file.write_all(bytes).context("无法写入应用配置")?;
+    file.sync_all().context("无法同步应用配置")?;
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).context("无法限制配置文件权限")?;
+    }
+    if let Err(first) = fs::rename(&temporary, path) {
+        if path.exists() {
+            fs::remove_file(path).context("无法替换旧的应用配置")?;
+            fs::rename(&temporary, path).context("无法保存新的应用配置")?;
+        } else {
+            return Err(first).context("无法保存应用配置");
+        }
+    }
+    Ok(())
+}
+
+fn write_settings(app: &AppHandle, settings: &PersistedSettings) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(settings).context("无法编码用户设置")?;
+    write_private(&config_path(app, SETTINGS_FILE)?, &bytes)
+}
+
+fn read_settings(app: &AppHandle) -> Result<Option<PersistedSettings>> {
+    let path = config_path(app, SETTINGS_FILE)?;
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("无法读取用户设置"),
+    };
+    let mut settings: PersistedSettings = serde_json::from_slice(&bytes).context("用户设置文件已损坏")?;
+    if settings.version == 1 {
+        // 0.1.5 development snapshots briefly stored opted-in secrets in this
+        // file. Remove them during migration; they cannot be encrypted without
+        // asking for a password, so the user must enter them once more.
+        settings.version = SETTINGS_VERSION;
+        settings.save_sensitive = false;
+        settings.options.api_key.clear();
+        settings.options.proxy_url.clear();
+        write_settings(app, &settings).context("无法迁移旧用户设置")?;
+    } else if settings.version != SETTINGS_VERSION {
+        return Err(anyhow!("不支持的用户设置版本 {}；请删除旧配置后重试", settings.version));
+    }
+    // Defense in depth for hand-edited files.
+    settings.options.api_key.clear();
+    settings.options.proxy_url.clear();
+    Ok(Some(settings))
+}
+
+fn validate_vault_password(password: &str) -> Result<()> {
+    if password.as_bytes().len() < 8 { return Err(anyhow!("加密密码至少需要 8 个字符")); }
+    if password.as_bytes().len() > 1024 { return Err(anyhow!("加密密码过长")); }
+    Ok(())
+}
+
+fn derive_vault_key(password: &str, salt: &[u8], iterations: u32) -> Result<[u8; 32]> {
+    let rounds = NonZeroU32::new(iterations).ok_or_else(|| anyhow!("加密配置迭代次数无效"))?;
+    let mut key = [0u8; 32];
+    pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256, rounds, salt, password.as_bytes(), &mut key);
+    Ok(key)
+}
+
+fn encrypt_secrets(password: &str, payload: &SecretPayload) -> Result<Vec<u8>> {
+    validate_vault_password(password)?;
+    if payload.api_key.trim().is_empty() { return Err(anyhow!("保存加密配置前请填写 API Key")); }
+    let random = SystemRandom::new();
+    let mut salt = [0u8; 16]; let mut nonce = [0u8; 12];
+    random.fill(&mut salt).map_err(|_| anyhow!("无法生成加密随机数"))?;
+    random.fill(&mut nonce).map_err(|_| anyhow!("无法生成加密随机数"))?;
+    let key_bytes = derive_vault_key(password, &salt, PBKDF2_ITERATIONS)?;
+    let key = aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化加密器"))?);
+    let mut plaintext = serde_json::to_vec(payload).context("无法编码敏感配置")?;
+    key.seal_in_place_append_tag(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut plaintext)
+        .map_err(|_| anyhow!("无法加密敏感配置"))?;
+    let encrypted = EncryptedSecrets {
+        version: 1, algorithm: "AES-256-GCM/PBKDF2-HMAC-SHA256".into(), iterations: PBKDF2_ITERATIONS,
+        salt: STANDARD.encode(salt), nonce: STANDARD.encode(nonce), ciphertext: STANDARD.encode(plaintext),
+    };
+    serde_json::to_vec_pretty(&encrypted).context("无法编码加密配置")
+}
+
+fn decrypt_secrets(password: &str, bytes: &[u8]) -> Result<SecretPayload> {
+    validate_vault_password(password)?;
+    let encrypted: EncryptedSecrets = serde_json::from_slice(bytes).map_err(|_| anyhow!("加密配置已损坏"))?;
+    if encrypted.version != 1 || encrypted.algorithm != "AES-256-GCM/PBKDF2-HMAC-SHA256"
+        || !(100_000..=2_000_000).contains(&encrypted.iterations) {
+        return Err(anyhow!("不支持的加密配置格式"));
+    }
+    let salt = STANDARD.decode(&encrypted.salt).map_err(|_| anyhow!("加密配置已损坏"))?;
+    let nonce_bytes = STANDARD.decode(&encrypted.nonce).map_err(|_| anyhow!("加密配置已损坏"))?;
+    let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| anyhow!("加密配置已损坏"))?;
+    let mut ciphertext = STANDARD.decode(&encrypted.ciphertext).map_err(|_| anyhow!("加密配置已损坏"))?;
+    let key_bytes = derive_vault_key(password, &salt, encrypted.iterations)?;
+    let key = aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化解密器"))?);
+    let plaintext = key.open_in_place(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut ciphertext)
+        .map_err(|_| anyhow!("密码错误或加密配置已损坏"))?;
+    serde_json::from_slice(plaintext).map_err(|_| anyhow!("密码错误或加密配置已损坏"))
+}
+
+fn write_encrypted_secrets(app: &AppHandle, password: &str, payload: &SecretPayload) -> Result<()> {
+    let bytes = encrypt_secrets(password, payload)?;
+    write_private(&config_path(app, SECRETS_FILE)?, &bytes)
+}
+
+fn remove_encrypted_secrets(app: &AppHandle) -> Result<()> {
+    let path = config_path(app, SECRETS_FILE)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("无法删除加密配置"),
+    }
+}
+
+fn read_encrypted_secrets(app: &AppHandle, password: &str) -> Result<SecretPayload> {
+    let bytes = fs::read(config_path(app, SECRETS_FILE)?).context("没有找到加密配置；请填写 API Key 后重新保存")?;
+    decrypt_secrets(password, &bytes)
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Status { phase: String, message: String, shortcut_available: bool, overlay_locked: bool, platform: String, network_route: String, transcription_only: bool }
@@ -159,13 +340,64 @@ async fn copy_diagnostic_text(app: AppHandle, text: String) -> Result<(), String
     { let _ = (app, text); Err("桌面端请使用 WebView 剪贴板或手动复制".into()) }
 }
 #[tauri::command] fn start_translation(app: AppHandle, options: StartOptions) -> Result<(),String> { start_session(app, options).map_err(|e|format!("{e:#}")) }
-// Keep controls in memory only, so F8 also works before the first start.
-// While idle, synchronize the desktop overlay's mode with the selection.
-// During a session the status must continue to describe the active model.
 #[tauri::command]
-fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, options: StartOptions) {
+fn get_saved_settings(app: AppHandle, state: tauri::State<'_, Controller>) -> Result<Option<PersistedSettings>, String> {
+    let saved = read_settings(&app).map_err(|e| format!("{e:#}"))?;
+    if let Some(settings) = &saved {
+        let transcription_only = settings.options.model.is_transcription_only();
+        let mut inner = state.0.lock().unwrap();
+        inner.last = Some(settings.options.clone());
+        let changed = inner.cancel.is_none()
+            && matches!(inner.status.phase.as_str(), "idle" | "error")
+            && inner.status.transcription_only != transcription_only;
+        if changed { inner.status.transcription_only = transcription_only; }
+        let status = if changed { Some(inner.status.clone()) } else { None };
+        drop(inner);
+        if let Some(status) = status {
+            publish(&app, &status);
+            let _ = app.emit("subtitle-update", Subtitle { original: String::new(), translated: String::new(), transcription_only });
+        }
+    }
+    Ok(saved)
+}
+#[tauri::command]
+fn unlock_saved_secrets(app: AppHandle, state: tauri::State<'_, Controller>, password: String) -> Result<SecretPayload, String> {
+    let payload = read_encrypted_secrets(&app, &password).map_err(|e| format!("{e:#}"))?;
+    let mut inner = state.0.lock().unwrap();
+    if let Some(options) = &mut inner.last {
+        options.api_key = payload.api_key.clone();
+        options.proxy_url = payload.proxy_url.clone();
+    }
+    Ok(payload)
+}
+
+// Keep the most recent controls in memory for F8 and persist non-sensitive
+// preferences. Sensitive fields only enter the password-encrypted vault.
+#[tauri::command]
+fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, mut options: StartOptions, save_sensitive: bool, encryption_password: String) -> Result<(), String> {
+    if save_sensitive {
+        let vault_exists = config_path(&app, SECRETS_FILE).map_err(|e| format!("{e:#}"))?.exists();
+        if encryption_password.is_empty() {
+            if !vault_exists { return Err("请输入加密密码以保存 API Key".into()); }
+        } else {
+            let payload = SecretPayload { api_key: options.api_key.clone(), proxy_url: options.proxy_url.clone() };
+            write_encrypted_secrets(&app, &encryption_password, &payload).map_err(|e| format!("{e:#}"))?;
+        }
+    } else {
+        remove_encrypted_secrets(&app).map_err(|e| format!("{e:#}"))?;
+    }
+    let persisted = settings_for_storage(&options, save_sensitive);
+    write_settings(&app, &persisted).map_err(|e| format!("{e:#}"))?;
     let transcription_only = options.model.is_transcription_only();
     let mut inner = state.0.lock().unwrap();
+    // Editing ordinary preferences before unlocking must not erase secrets
+    // already held in this process (for example after using F8).
+    if save_sensitive && options.api_key.is_empty() {
+        if let Some(previous) = &inner.last {
+            options.api_key = previous.api_key.clone();
+            if options.proxy_url.is_empty() { options.proxy_url = previous.proxy_url.clone(); }
+        }
+    }
     inner.last = Some(options);
     let changed = inner.cancel.is_none()
         && matches!(inner.status.phase.as_str(), "idle" | "error")
@@ -177,6 +409,7 @@ fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, option
         publish(&app, &status);
         let _ = app.emit("subtitle-update", Subtitle { original: String::new(), translated: String::new(), transcription_only });
     }
+    Ok(())
 }
 #[tauri::command] fn stop_translation(app: AppHandle) { stop_session(&app); }
 #[tauri::command] fn toggle_translation(app: AppHandle) { toggle_session(&app); }
@@ -449,7 +682,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
 pub fn run() {
     let mut builder = tauri::Builder::default().manage(Controller::default()).manage(LogStore::default());
     #[cfg(target_os="android")] { builder = builder.plugin(tauri_plugin_mobile_audio::init()); }
-    builder = builder.invoke_handler(tauri::generate_handler![list_audio_devices,get_status,get_diagnostics,clear_diagnostics,copy_diagnostic_text,start_translation,remember_settings,stop_translation,toggle_translation,set_overlay_locked,request_overlay_permission,quit_app]);
+    builder = builder.invoke_handler(tauri::generate_handler![list_audio_devices,get_status,get_saved_settings,unlock_saved_secrets,get_diagnostics,clear_diagnostics,copy_diagnostic_text,start_translation,remember_settings,stop_translation,toggle_translation,set_overlay_locked,request_overlay_permission,quit_app]);
     #[cfg(not(any(target_os="android", target_os="ios")))]
     {
         // The click-through overlay has no taskbar entry or tray. Closing the
@@ -482,7 +715,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_fragment, replace_transcript, StartOptions};
+    use super::{add_fragment, decrypt_secrets, encrypt_secrets, replace_transcript, settings_for_storage, SecretPayload, StartOptions};
 
     #[test]
     fn subtitle_fragments_handle_deltas_hypotheses_and_reset() {
@@ -517,6 +750,43 @@ mod tests {
         let long = "中".repeat(301);
         replace_transcript(&mut text, None, Some(&long));
         assert_eq!(text.chars().count(), 300);
+    }
+
+    #[test]
+    fn persisted_settings_require_opt_in_for_secrets() {
+        let options: StartOptions = serde_json::from_value(serde_json::json!({
+            "apiKey":"PRIVATE-KEY", "model":"general_live", "targetLanguage":"zh",
+            "mode":"microphone_only", "proxyMode":"manual",
+            "proxyUrl":"http://alice:password@127.0.0.1:7890"
+        })).unwrap();
+        let ordinary = settings_for_storage(&options, false);
+        assert!(ordinary.options.api_key.is_empty());
+        assert!(ordinary.options.proxy_url.is_empty());
+        assert!(!ordinary.save_sensitive);
+        let sensitive = settings_for_storage(&options, true);
+        assert!(sensitive.options.api_key.is_empty());
+        assert!(sensitive.options.proxy_url.is_empty());
+        assert!(sensitive.save_sensitive);
+        let json = serde_json::to_value(ordinary).unwrap();
+        assert_eq!(json["options"]["model"], "general_live");
+        assert_eq!(json["options"]["proxyMode"], "manual");
+    }
+
+    #[test]
+    fn encrypted_secrets_round_trip_and_reject_wrong_password() {
+        let payload = SecretPayload {
+            api_key: "PRIVATE-KEY".into(),
+            proxy_url: "socks5://alice:password@127.0.0.1:1080".into(),
+        };
+        let encrypted = encrypt_secrets("correct horse battery staple", &payload).unwrap();
+        let text = String::from_utf8(encrypted.clone()).unwrap();
+        assert!(!text.contains("PRIVATE-KEY"));
+        assert!(!text.contains("alice:password"));
+        let decrypted = decrypt_secrets("correct horse battery staple", &encrypted).unwrap();
+        assert_eq!(decrypted.api_key, payload.api_key);
+        assert_eq!(decrypted.proxy_url, payload.proxy_url);
+        assert!(decrypt_secrets("wrong password", &encrypted).is_err());
+        assert!(encrypt_secrets("short", &payload).is_err());
     }
 
     #[test]

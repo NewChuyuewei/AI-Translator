@@ -17,6 +17,18 @@ window.__TAURI_INTERNALS__ = {
     calls.push({ cmd, args });
     if (cmd === 'plugin:event|listen') { handlers.set(args.event, callbacks.get(args.handler)); return nextId++; }
     if (cmd === 'get_status') return current;
+    if (cmd === 'get_saved_settings') return {
+      version: 2, saveSensitive: true, options: {
+        apiKey: '', model: 'general_live', thinkingLevel: 'LOW', transcriptionMode: 'VERBATIM',
+        targetLanguage: 'zh', bidirectional: false, otherLanguage: 'en', mode: 'microphone_only',
+        microphoneDevice: 'mic', systemDevice: null, playbackEnabled: false, playbackDevice: null,
+        proxyMode: 'auto', proxyUrl: '',
+      },
+    };
+    if (cmd === 'unlock_saved_secrets') {
+      if (args.password !== 'vault-password') throw new Error('密码错误或加密配置已损坏');
+      return { apiKey:'restored-key', proxyUrl:'' };
+    }
     if (cmd === 'get_diagnostics') return history;
     if (cmd === 'clear_diagnostics') return clearWatermark;
     if (cmd === 'copy_diagnostic_text') return null;
@@ -56,9 +68,32 @@ Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value
 $('copy-diagnostics').click(); await wait(0);
 assert.ok(desktopClipboard.includes('新的安全日志 <tag>'));
 assert.equal($('notice').textContent, '诊断日志已复制');
+assert.equal(calls.filter(c=>c.cmd==='get_saved_settings').length, 1);
+assert.equal($('save-sensitive').checked, true);
+assert.equal($('api-key').value, '');
+assert.equal($('microphone-device').value, 'mic');
+assert.equal($('vault-controls').classList.contains('hidden'), false);
+$('encryption-password').value = 'vault-password'; $('unlock-vault').click(); await wait(0);
+assert.equal(calls.filter(c=>c.cmd==='unlock_saved_secrets').length, 1);
+assert.equal($('api-key').value, 'restored-key');
+assert.ok($('vault-status').textContent.includes('已解锁'));
+$('save-sensitive').checked = false; $('save-sensitive').dispatchEvent(new window.Event('change'));
+await wait(260);
+let rememberedCall = calls.filter(c=>c.cmd==='remember_settings').at(-1);
+assert.equal(rememberedCall.args.saveSensitive, false);
+assert.equal(rememberedCall.args.encryptionPassword, '');
+assert.ok($('notice').textContent.includes('加密副本将被清除'));
 $('api-key').value = 'test-key'; $('api-key').dispatchEvent(new window.Event('input'));
-await wait(220);
-assert.equal(calls.filter(c=>c.cmd==='remember_settings').at(-1).args.options.apiKey,'test-key');
+await wait(260);
+rememberedCall = calls.filter(c=>c.cmd==='remember_settings').at(-1);
+assert.equal(rememberedCall.args.options.apiKey,'test-key');
+assert.equal(rememberedCall.args.saveSensitive, false);
+$('save-sensitive').checked = true; $('save-sensitive').dispatchEvent(new window.Event('change'));
+$('encryption-password').value = 'new-vault-password'; $('unlock-vault').click(); await wait(0);
+rememberedCall = calls.filter(c=>c.cmd==='remember_settings').at(-1);
+assert.equal(rememberedCall.args.saveSensitive, true);
+assert.equal(rememberedCall.args.encryptionPassword, 'new-vault-password');
+assert.ok($('notice').textContent.includes('已加密保存'));
 $('start-stop').click(); await wait(0);
 assert.equal(calls.filter(c=>c.cmd==='start_translation').at(-1).args.options.proxyMode, 'auto');
 assert.equal(calls.filter(c=>c.cmd==='start_translation').at(-1).args.options.proxyUrl, '');
@@ -163,5 +198,5 @@ assert.equal($('overlay-lock').disabled, true);
 status({ phase:'connecting' }); assert.equal($('overlay-permission').disabled, true);
 status({ phase:'running' }); assert.equal($('overlay-lock').disabled, false);
 await wait(250); // Let the last debounced remember_settings invocation finish.
-console.log('UI mock checks passed: diagnostics buffering/clear/clipboard, key/options, proxy, models, cancel, events, overlay, reconfigure and Android controls.');
+console.log('UI mock checks passed: diagnostics, encrypted vault unlock/save/delete, settings, proxy, models, events, overlay and Android controls.');
 dom.window.close();

@@ -9,11 +9,11 @@
 - 增加 `gemini-3.5-live-translate-preview`：每个会话固定**一个目标语言**，原文及译文字幕，可选择播放译音；不是双向翻译。当前 `echoTargetLanguage=false`：输入已是目标语言时不会复述。
 - 增加 `gemini-3.5-transcribe-live`：用户明确选择**只实时转写原文，不做翻译，也不播放译音**；不得私自串接收费的二次翻译服务。目标语言、双向和译音控制在该模式不可用。默认 VERBATIM；可选 SMART，它只整理原文，可能删除口头语或修改格式。
 - 控制台、桌面字幕窗、Android 悬浮窗和前台通知应真实区分「翻译」与「转写」，不能在转写模式显示等待译文或启动播放器。
-- 本版源码版本 **0.1.4**；历史 0.1.3 的 APK / Windows 包**没有** 3.5 功能，不能冒充新版交付。
+- 当前源码版本 **0.1.5**；历史 0.1.3 的 APK / Windows 包**没有** 3.5 功能，不能冒充新版交付。0.1.5 尚未生成或验证安装包。
 
 ## 2. 最重要的未解决问题：Android 启动闪退
 
-用户报告：安装 0.1.3 ARM64 debug APK 后，Android 15+ 的 AOSP 和 Xiaomi HyperOS 手机上启动即闪退。**还没有用户崩溃堆栈，没有确认根因，0.1.4 没有针对该闪退的已证实修复，也未在用户手机验证。**不要声称启动问题已经解决。
+用户报告：安装 0.1.3 ARM64 debug APK 后，Android 15+ 的 AOSP 和 Xiaomi HyperOS 手机上启动即闪退。**还没有用户崩溃堆栈，没有确认根因，0.1.4 和当前 0.1.5 源码都没有针对该闪退的已证实修复，也未在用户手机验证。**不要声称启动问题已经解决。
 
 既往检查了 APK manifest、ABI、JNI 符号、ELF/ZIP 16 KB 对齐、签名和 Tauri/Tao 的 Android context 初始化，未发现可确定的原因；静态检查通过不等于运行正常。尝试在无 KVM 的 x86_64 主机使用 Android 15 Google APIs 模拟器及 ARM native bridge，启动极慢且在结束尝试前未完成系统 boot，**没有安装或运行 APK 的有效结果**；这也不能代替 ARM 真机。
 
@@ -49,6 +49,7 @@
 - `src-tauri/src/audio_router.rs`：混音、重采样和有界队列；`audio_player.rs`：可选 24 kHz 输出和中断清空；`mac_system_audio.rs`：ScreenCaptureKit。
 - `src-tauri/src/proxy.rs`、`diagnostics.rs`：系统/手动代理和有限的内存诊断，不保存密钥或字幕。选定路径不是 VPN 可用性的证明；选中代理失败不会自动绕过。
 - `src/control.html`、`src/control.js`、`src/styles.css`：模型选择、逐字/智能转写、状态、选项、字幕预览与设备/代理；`src/index.html`、`src/overlay.js`：桌面字幕窗。
+- 0.1.5 增加本地设置恢复与加密保险库：普通偏好保存到 Tauri 应用私有目录的 `settings.json`，API Key／手动代理地址始终在普通序列化前清空。用户明确启用并提供至少 8 字符密码后，敏感字段使用 AES-256-GCM + PBKDF2-HMAC-SHA256（210,000 次、随机盐和 nonce）写入 `secrets.enc.json`；密码不保存，重启后需解锁。Unix 尝试将目录设为 0700、文件设为 0600。不要将其描述为可抵御已控制设备或 root 的硬件钥匙串。
 - `plugins/mobile-audio/src/lib.rs`、`plugins/mobile-audio/android/.../AudioPlugin.kt`、`AudioCaptureService.kt`：Android JNI 音频、权限、前台服务、通知和悬浮窗。`transcriptionOnly` 从 Rust start 参数传至服务，决定通知和原生悬浮窗；避免误显示「等待翻译」。
 - `tests/ui_mock_test.mjs`、`tests/overlay_mock_test.mjs` 和 Rust 单元测试：模拟 UI、协议、分段、网络及无敏感信息日志；测试不代表真实服务或真实设备可用。
 - `README.md` 是用户手册；`packaging/` 含 Windows NSIS 脚本与便携版说明。版本号同时出现在 `package*.json`、`src-tauri/Cargo.toml` / `Cargo.lock`、`tauri*.conf.json` 和 NSIS 脚本，更新时保持一致。
@@ -84,6 +85,7 @@ Windows GNU 交叉构建及 NSIS 命令见 `README.md`；免安装版的 `WebVie
 
 ## 6. 当前验证边界与下一步
 
+- 0.1.5 本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入，但尚未在 GitHub runner 实跑；发布工作流会生成 Windows NSIS、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的 Android ARM64 APK。尚未生成或验证 0.1.5 安装包。
 - 0.1.4 前端 `npm run build`、JSDOM 控制台 / 字幕窗模拟测试通过；Linux Rust 单元和本地模拟 WebSocket 测试 **30/30** 通过。Android ARM64 debug APK 已构建，静态确认 0.1.4 / versionCode 1004、16 KB ZIP/ELF 对齐及与 0.1.3 相同的调试签名；这些检查不能证明能在手机上启动。Windows x64 GNU release 已交叉编译，NSIS 安装包与便携 ZIP 已构建并静态检查，**未在 Windows 真机运行**。
 - 本次交付文件名：`Gemini-Live-Translator-0.1.4-arm64-debug.apk`、`Gemini-Live-Translator-0.1.4-Windows-Setup.exe`、`Gemini-Live-Translator-0.1.4-Windows-portable.zip`、`Gemini-Live-Translator-0.1.4-source.zip`。源码包内含本文件，但不包含其他安装包或签名密钥；新会话需要继续开发时请提供源码包。
 - 没有真实 Gemini API Key，也没有可用真机，**尚未验证** 3.5 模型的真实 setup 接受情况、各语种 interim/final 事件、译音、代理、音频捕获及目标平台 UI。账号、地区和配额可能限制模型。
