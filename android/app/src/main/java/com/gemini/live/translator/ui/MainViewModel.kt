@@ -2,13 +2,11 @@ package com.gemini.live.translator.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.gemini.live.translator.audio.MicrophoneCapture
+import com.gemini.live.translator.SessionRuntime
 import com.gemini.live.translator.data.CaptionState
 import com.gemini.live.translator.data.GeminiMode
 import com.gemini.live.translator.data.SessionConfig
 import com.gemini.live.translator.data.SessionState
-import com.gemini.live.translator.network.ClientEvent
-import com.gemini.live.translator.network.SessionClient
 import com.gemini.live.translator.security.SecretStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,44 +24,26 @@ data class MainUiState(
 )
 
 class MainViewModel(
-    private val client: SessionClient,
+    private val runtime: SessionRuntime,
     private val secrets: SecretStore,
-    private val microphone: MicrophoneCapture,
 ) : ViewModel() {
     private val initialKey = secrets.loadApiKey()
     private val mutableState = MutableStateFlow(
-        MainUiState(apiKey = initialKey.orEmpty(), rememberKey = initialKey != null),
+        MainUiState(
+            apiKey = initialKey.orEmpty(),
+            rememberKey = initialKey != null,
+            session = runtime.session.value,
+            caption = runtime.caption.value,
+        ),
     )
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
 
     init {
         viewModelScope.launch {
-            client.events.collect { event ->
-                when (event) {
-                    ClientEvent.Connected -> {
-                        mutableState.update { it.copy(session = SessionState.Running) }
-                        microphone.start(
-                            scope = viewModelScope,
-                            onFrame = { frame ->
-                                try { client.sendAudio(frame) } finally { frame.fill(0) }
-                            },
-                            onError = { message ->
-                                client.stop()
-                                mutableState.update { it.copy(session = SessionState.Failed(message)) }
-                            },
-                        )
-                    }
-                    is ClientEvent.Caption -> mutableState.update { it.copy(caption = event.value) }
-                    is ClientEvent.Failed -> {
-                        microphone.stop()
-                        mutableState.update { it.copy(session = SessionState.Failed(event.safeMessage)) }
-                    }
-                    ClientEvent.Closed -> {
-                        microphone.stop()
-                        mutableState.update { it.copy(session = SessionState.Idle) }
-                    }
-                }
-            }
+            runtime.session.collect { session -> mutableState.update { it.copy(session = session) } }
+        }
+        viewModelScope.launch {
+            runtime.caption.collect { caption -> mutableState.update { it.copy(caption = caption) } }
         }
     }
 
@@ -81,25 +61,14 @@ class MainViewModel(
                 return
             }
         if (snapshot.rememberKey) secrets.saveApiKey(config.apiKey) else secrets.clear()
-        mutableState.update { it.copy(session = SessionState.Connecting, caption = CaptionState()) }
-        runCatching { client.connect(config) }.onFailure {
+        runCatching { runtime.start(config) }.onFailure {
             mutableState.update { state -> state.copy(session = SessionState.Failed("无法启动会话")) }
         }
     }
 
-    fun stop() {
-        mutableState.update { it.copy(session = SessionState.Stopping) }
-        microphone.stop()
-        client.stop()
-    }
+    fun stop() = runtime.stop()
 
     fun microphonePermissionDenied() {
-        mutableState.update { it.copy(session = SessionState.Failed("需要麦克风权限才能开始")) }
-    }
-
-    override fun onCleared() {
-        microphone.stop()
-        client.stop()
-        super.onCleared()
+        mutableState.update { it.copy(session = SessionState.Failed("需要麦克风和通知权限才能开始")) }
     }
 }

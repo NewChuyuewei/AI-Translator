@@ -28,6 +28,7 @@ interface SessionClient {
 sealed interface ClientEvent {
     data object Connected : ClientEvent
     data class Caption(val value: CaptionState) : ClientEvent
+    data class Audio(val pcm: ByteArray) : ClientEvent
     data class Failed(val safeMessage: String) : ClientEvent
     data object Closed : ClientEvent
 }
@@ -88,7 +89,7 @@ class GeminiSessionClient : SessionClient {
                 fail(webSocket, "服务器消息超过安全限制")
                 return
             }
-            parse(text)?.let(mutableEvents::tryEmit)
+            parse(text).forEach(mutableEvents::tryEmit)
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -127,10 +128,11 @@ class GeminiSessionClient : SessionClient {
         }
     }
 
-    private fun parse(text: String): ClientEvent? = runCatching {
+    private fun parse(text: String): List<ClientEvent> = runCatching {
         val root = JSONObject(text)
-        if (root.has("setupComplete")) return ClientEvent.Connected
-        val content = root.optJSONObject("serverContent") ?: root.optJSONObject("server_content") ?: return null
+        if (root.has("setupComplete")) return listOf(ClientEvent.Connected)
+        val content = root.optJSONObject("serverContent") ?: root.optJSONObject("server_content") ?: return emptyList()
+        val events = mutableListOf<ClientEvent>()
         fun transcription(camel: String, snake: String): String =
             (content.optJSONObject(camel) ?: content.optJSONObject(snake))
                 ?.optString("text")
@@ -138,8 +140,24 @@ class GeminiSessionClient : SessionClient {
                 .orEmpty()
         val input = transcription("inputTranscription", "input_transcription")
         val output = transcription("outputTranscription", "output_transcription")
-        if (input.isEmpty() && output.isEmpty()) null else ClientEvent.Caption(CaptionState(input, output))
-    }.getOrElse { ClientEvent.Failed("Gemini 返回了无效消息") }
+        if (input.isNotEmpty() || output.isNotEmpty()) events += ClientEvent.Caption(CaptionState(input, output))
+        val turn = content.optJSONObject("modelTurn") ?: content.optJSONObject("model_turn")
+        val parts = turn?.optJSONArray("parts")
+        var totalAudio = 0
+        if (parts != null) for (index in 0 until parts.length()) {
+            val part = parts.optJSONObject(index) ?: continue
+            val inline = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data") ?: continue
+            val mime = inline.optString("mimeType", inline.optString("mime_type", ""))
+            if (!mime.startsWith("audio/pcm") || !mime.contains("rate=24000")) continue
+            val encoded = inline.optString("data")
+            if (encoded.length > MAX_AUDIO_BASE64_CHARS) error("audio too large")
+            val decoded = Base64.decode(encoded, Base64.NO_WRAP)
+            totalAudio += decoded.size
+            if (totalAudio > MAX_AUDIO_BYTES) error("audio too large")
+            events += ClientEvent.Audio(decoded)
+        }
+        events
+    }.getOrElse { listOf(ClientEvent.Failed("Gemini 返回了无效消息")) }
 
     private fun setup(config: SessionConfig): JSONObject {
         val generation = JSONObject().put("responseModalities", if (config.mode.transcriptionOnly) org.json.JSONArray().put("TEXT") else org.json.JSONArray().put("AUDIO"))
@@ -157,6 +175,8 @@ class GeminiSessionClient : SessionClient {
         const val MAX_MESSAGE_BYTES = 2 * 1024 * 1024
         const val MAX_MESSAGE_CHARS = 2 * 1024 * 1024
         const val MAX_TRANSCRIPT_CHARS = 16_000
+        const val MAX_AUDIO_BYTES = 1024 * 1024
+        const val MAX_AUDIO_BASE64_CHARS = (MAX_AUDIO_BYTES / 3 + 1) * 4
         const val MAX_SOCKET_QUEUE_BYTES = 32L * 1024
     }
 }
