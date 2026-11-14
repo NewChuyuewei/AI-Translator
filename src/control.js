@@ -3,8 +3,8 @@ import { listen } from '@tauri-apps/api/event';
 
 const $ = (id) => document.getElementById(id);
 const isTauri = !!window.__TAURI_INTERNALS__;
-let status = { phase: 'idle', message: '准备就绪', platform: 'preview', shortcutAvailable: false, overlayLocked: true, networkRoute: '尚未检测', transcriptionOnly: false };
-let reconfigureTimer, rememberTimer, reconfiguring = false, noticeTimer;
+let status = { phase: 'idle', message: '准备就绪', platform: 'preview', shortcutAvailable: false, overlayLocked: true, networkRoute: '尚未检测', transcriptionOnly: false, overlayScale: 1 };
+let reconfigureTimer, rememberTimer, overlayScaleTimer, reconfiguring = false, noticeTimer;
 let previewTranscriptionOnly = null, devicePlatform = null;
 let vaultUnlocked = false, hasSavedVault = false, secretsDirty = false, secretEditSeq = 0;
 const waiting = [];
@@ -71,8 +71,14 @@ function toast(message) {
   const el = $('notice'); el.textContent = String(message); el.classList.remove('hidden');
   clearTimeout(noticeTimer); noticeTimer = setTimeout(() => el.classList.add('hidden'), 5000);
 }
+function renderScale(value) {
+  const percent = Math.round((Number(value) || 1) * 100);
+  $('overlay-scale').value = String(Math.min(160, Math.max(80, percent)));
+  $('overlay-scale-value').textContent = `${$('overlay-scale').value}%`;
+}
 function renderStatus(next) {
   status = { ...status, ...next };
+  if (Number.isFinite(status.overlayScale)) renderScale(status.overlayScale);
   // A manual stop must cancel a queued settings restart, not restart capture.
   if (status.phase !== 'running' && !reconfiguring) clearTimeout(reconfigureTimer);
   $('status-message').textContent = status.message;
@@ -86,6 +92,7 @@ function renderStatus(next) {
   $('overlay-permission').classList.toggle('hidden', status.platform !== 'android');
   $('overlay-permission').disabled = ['connecting', 'stopping'].includes(status.phase) || reconfiguring;
   $('overlay-lock').disabled = status.platform === 'android' && status.phase !== 'running';
+  $('overlay-scale').disabled = status.platform === 'android';
   const shortcut = document.querySelector('.shortcut');
   shortcut.classList.toggle('hidden', status.platform === 'android');
   shortcut.title = status.shortcutAvailable ? 'F8 开始 / 停止' : '当前平台未注册 F8';
@@ -108,6 +115,7 @@ function collectOptions() {
     playbackDevice: transcribe ? null : ($('playback-device').value || null),
     proxyMode: $('proxy-mode').value,
     proxyUrl: $('proxy-mode').value === 'manual' ? $('proxy-url').value.trim() : '',
+    overlayScale: Number($('overlay-scale').value) / 100,
   };
 }
 function waitForStopped() {
@@ -164,10 +172,14 @@ function applySavedSettings(saved) {
   ]) setSelectValue(id, value);
   $('bidirectional').checked = !!options.bidirectional;
   $('playback-enabled').checked = !!options.playbackEnabled;
+  renderScale(options.overlayScale || 1);
   $('proxy-url').value = options.proxyUrl || '';
   const mode = [...document.querySelectorAll('input[name=mode]')].find(input => input.value === options.mode);
   if (mode) mode.checked = true;
   updateVaultUi(); updateProxy(); updateModel();
+  if (isTauri && status.platform !== 'android') {
+    invoke('set_overlay_scale', { scale: Number($('overlay-scale').value) / 100 }).catch(toast);
+  }
 }
 async function start() {
   if (!isTauri) { toast('这是浏览器界面预览。请在 Tauri 桌面或 Android 应用中运行。'); return; }
@@ -262,6 +274,13 @@ $('copy-diagnostics').addEventListener('click', copyDiagnostics);
 $('clear-diagnostics').addEventListener('click', clearDiagnostics);
 $('refresh-devices').addEventListener('click', refreshDevices);
 $('reveal-key').addEventListener('click', () => { const input = $('api-key'); const showing = input.type === 'text'; input.type = showing ? 'password' : 'text'; $('reveal-key').textContent = showing ? '显示' : '隐藏'; });
+$('overlay-scale').addEventListener('input', () => {
+  const scale = Number($('overlay-scale').value) / 100;
+  renderScale(scale); rememberOptions();
+  if (!isTauri || status.platform === 'android') return;
+  clearTimeout(overlayScaleTimer);
+  overlayScaleTimer = setTimeout(() => invoke('set_overlay_scale', { scale }).catch(toast), 80);
+});
 $('overlay-lock').addEventListener('click', async () => {
   if (!isTauri) return toast('请在 Tauri 应用中控制悬浮窗');
   try { await invoke('set_overlay_locked', { locked: !status.overlayLocked }); } catch (e) { toast(e); }
@@ -335,6 +354,10 @@ if (isTauri) {
     if (typeof event.payload.transcriptionOnly === 'boolean') setPreviewMode(event.payload.transcriptionOnly);
     $('preview-original').textContent = event.payload.original || '等待语音输入…';
     $('preview-translated').textContent = event.payload.translated || '翻译结果将在这里显示。';
+    window.requestAnimationFrame(() => {
+      const preview = document.querySelector('.subtitle-preview');
+      preview.scrollTop = preview.scrollHeight;
+    });
   });
   listen('session-notice', event => toast(event.payload));
   (async () => {

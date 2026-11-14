@@ -48,7 +48,7 @@
 - `src-tauri/src/gemini_client.rs`：模型枚举、每种模型的 setup、WSS、消息解码、输入/输出与 interim 转写。日志只记录安全类别，不记录原始内容。
 - `src-tauri/src/audio_router.rs`：混音、重采样和有界队列；`audio_player.rs`：可选 24 kHz 输出和中断清空；`mac_system_audio.rs`：ScreenCaptureKit。
 - `src-tauri/src/proxy.rs`、`diagnostics.rs`：系统/手动代理和有限的内存诊断，不保存密钥或字幕。选定路径不是 VPN 可用性的证明；选中代理失败不会自动绕过。
-- `src/control.html`、`src/control.js`、`src/styles.css`：模型选择、逐字/智能转写、状态、选项、字幕预览与设备/代理；`src/index.html`、`src/overlay.js`：桌面字幕窗。
+- `src/control.html`、`src/control.js`、`src/styles.css`：模型选择、逐字/智能转写、状态、选项、字幕预览与设备/代理；`src/index.html`、`src/overlay.js`：桌面字幕窗。桌面字幕的原文／译文区域会在内容增长时自动跟随到底部；控制台可将窗口和字号在 80%–160% 间缩放，比例保存在普通设置中。
 - 0.1.5 增加本地设置恢复与加密保险库：普通偏好保存到 Tauri 应用私有目录的 `settings.json`，API Key／手动代理地址始终在普通序列化前清空。用户明确启用并提供至少 8 字符密码后，敏感字段使用 AES-256-GCM + PBKDF2-HMAC-SHA256（210,000 次、随机盐和 nonce）写入 `secrets.enc.json`；密码不保存，重启后需解锁。Unix 尝试将目录设为 0700、文件设为 0600。不要将其描述为可抵御已控制设备或 root 的硬件钥匙串。
 - `plugins/mobile-audio/src/lib.rs`、`plugins/mobile-audio/android/.../AudioPlugin.kt`、`AudioCaptureService.kt`：Android JNI 音频、权限、前台服务、通知和悬浮窗。`transcriptionOnly` 从 Rust start 参数传至服务，决定通知和原生悬浮窗；避免误显示「等待翻译」。
 - `tests/ui_mock_test.mjs`、`tests/overlay_mock_test.mjs` 和 Rust 单元测试：模拟 UI、协议、分段、网络及无敏感信息日志；测试不代表真实服务或真实设备可用。
@@ -81,11 +81,11 @@ npx tauri android build --debug --apk --target aarch64 --ci
 
 Android debug 包仅供开发：要覆盖旧应用需**相同签名**且版本号不低；源码包不包含任何 keystore，新机器通常会使用不同的调试签名。不要把 `~/.android/debug.keystore` 或 release key 打包/分享。正式发布应使用独立、安全保管的 release 签名。
 
-Windows GNU 交叉构建及 NSIS 命令见 `README.md`；免安装版的 `WebView2Loader.dll` 必须与 EXE 同目录，并需要系统 WebView2 Runtime。macOS 原生构建和签名需在 Mac 上完成。
+Windows GNU 交叉构建及 NSIS 命令见 `README.md`；GNU 免安装版的 `WebView2Loader.dll` 必须与 EXE 同目录。GitHub Actions 的原生 MSVC 便携 ZIP 始终包含 EXE 和说明，并在构建实际生成动态 `WebView2Loader.dll` 时一并收录。两者都需要系统 WebView2 Runtime。macOS 原生构建和签名需在 Mac 上完成。
 
 ## 6. 当前验证边界与下一步
 
-- 0.1.5 本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入，但尚未在 GitHub runner 实跑；发布工作流会生成 Windows NSIS、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的 Android ARM64 APK。尚未生成或验证 0.1.5 安装包。
+- 0.1.5 本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入并在 GitHub runner 试跑，已根据 Android SDK、macOS runner／SDK 错误继续修正，但完整发布仍待再次验证；发布工作流会生成 Windows NSIS 与便携 ZIP、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的 Android ARM64 APK。尚未生成或验证 0.1.5 安装包。
 - 0.1.4 前端 `npm run build`、JSDOM 控制台 / 字幕窗模拟测试通过；Linux Rust 单元和本地模拟 WebSocket 测试 **30/30** 通过。Android ARM64 debug APK 已构建，静态确认 0.1.4 / versionCode 1004、16 KB ZIP/ELF 对齐及与 0.1.3 相同的调试签名；这些检查不能证明能在手机上启动。Windows x64 GNU release 已交叉编译，NSIS 安装包与便携 ZIP 已构建并静态检查，**未在 Windows 真机运行**。
 - 本次交付文件名：`Gemini-Live-Translator-0.1.4-arm64-debug.apk`、`Gemini-Live-Translator-0.1.4-Windows-Setup.exe`、`Gemini-Live-Translator-0.1.4-Windows-portable.zip`、`Gemini-Live-Translator-0.1.4-source.zip`。源码包内含本文件，但不包含其他安装包或签名密钥；新会话需要继续开发时请提供源码包。
 - 没有真实 Gemini API Key，也没有可用真机，**尚未验证** 3.5 模型的真实 setup 接受情况、各语种 interim/final 事件、译音、代理、音频捕获及目标平台 UI。账号、地区和配额可能限制模型。

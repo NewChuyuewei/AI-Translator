@@ -36,6 +36,7 @@ window.__TAURI_INTERNALS__ = {
     if (cmd === 'start_translation') { status({phase:'connecting'}); return; }
     if (cmd === 'stop_translation') { status({phase:'stopping'}); setTimeout(() => status({phase:'idle'}), 10); return; }
     if (cmd === 'set_overlay_locked') { status({overlayLocked:args.locked}); return; }
+    if (cmd === 'set_overlay_scale') { status({overlayScale:args.scale}); return; }
     return null;
   }
 };
@@ -104,6 +105,10 @@ assert.equal(calls.filter(c=>c.cmd==='stop_translation').length,1);
 status({phase:'running'}); emit('subtitle-update',{original:'hello', translated:'你好'});
 assert.equal($('preview-original').textContent,'hello'); assert.equal($('preview-translated').textContent,'你好');
 $('overlay-lock').click(); await wait(0); assert.equal($('overlay-lock').textContent,'锁定并穿透');
+$('overlay-scale').value='130'; $('overlay-scale').dispatchEvent(new window.Event('input')); await wait(260);
+assert.equal($('overlay-scale-value').textContent, '130%');
+assert.equal(calls.filter(c=>c.cmd==='set_overlay_scale').at(-1).args.scale, 1.3);
+assert.equal(calls.filter(c=>c.cmd==='remember_settings').at(-1).args.options.overlayScale, 1.3);
 // An explicit stop cancels a queued settings restart.
 $('target').value='ja'; $('target').dispatchEvent(new window.Event('change'));
 status({phase:'stopping'}); status({phase:'idle'});

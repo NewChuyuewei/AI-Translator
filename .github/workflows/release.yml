@@ -72,6 +72,31 @@ jobs:
       - run: npm run test:ui
       - name: Build native bundles
         run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Create Windows portable ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $binary = "src-tauri/target/release/gemini-live-translator.exe"
+          if (-not (Test-Path $binary)) { throw "Windows application binary was not found: $binary" }
+
+          $portableName = "Gemini-Live-Translator-$version-Windows-portable"
+          $portableDir = Join-Path $env:RUNNER_TEMP $portableName
+          $archive = "release-assets/$portableName.zip"
+          New-Item -ItemType Directory -Force -Path $portableDir, "release-assets" | Out-Null
+          Copy-Item $binary (Join-Path $portableDir "Gemini-Live-Translator.exe")
+          $readme = Get-Content "packaging/windows-portable-readme.txt" -Raw
+          $readme = $readme -replace '(?m)^Gemini Live Translator [^ ]+', "Gemini Live Translator $version"
+          Set-Content (Join-Path $portableDir "README.txt") -Value $readme -Encoding utf8
+
+          # MSVC normally links the WebView2 loader statically. Preserve a DLL
+          # beside the executable if a future Tauri build emits one dynamically.
+          $loader = Get-ChildItem "src-tauri/target/release" -Recurse -Filter "WebView2Loader.dll" |
+            Select-Object -First 1
+          if ($loader) { Copy-Item $loader.FullName $portableDir }
+
+          Compress-Archive -Path "$portableDir/*" -DestinationPath $archive -CompressionLevel Optimal
+          Write-Host "Created $archive"
       - name: Stage native bundles
         shell: bash
         run: |
