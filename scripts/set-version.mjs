@@ -1,9 +1,14 @@
 import fs from 'node:fs';
 
 const version = process.argv[2];
-if (!version || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+const match = version?.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+if (!match) {
   console.error('Usage: node scripts/set-version.mjs <major.minor.patch>');
   process.exit(2);
+}
+const versionCode = Number(match[1]) * 1_000_000 + Number(match[2]) * 1_000 + Number(match[3]);
+if (!Number.isSafeInteger(versionCode) || versionCode > 2_100_000_000) {
+  throw new Error('Version is too large for Android versionCode');
 }
 
 function json(path, update) {
@@ -24,6 +29,8 @@ json('package-lock.json', value => {
 });
 replace('src-tauri/tauri.conf.json', /(\"version\"\s*:\s*\")[^\"]+(\")/, `$1${version}$2`, 'Tauri version');
 replace('src-tauri/tauri.android.conf.json', /(\"version\"\s*:\s*\")[^\"]+(\")/, `$1${version}$2`, 'Android Tauri version');
+replace('android/app/build.gradle.kts', /(versionCode\s*=\s*)\d+/, `$1${versionCode}`, 'native Android versionCode');
+replace('android/app/build.gradle.kts', /(versionName\s*=\s*")[^"]+(")/, `$1${version}$2`, 'native Android versionName');
 // Git may check text files out as CRLF on Windows runners. Match logical line
 // boundaries rather than assuming LF so custom releases are platform-neutral.
 replace('src-tauri/Cargo.toml', /(\[package\][\s\S]*?[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo package version');

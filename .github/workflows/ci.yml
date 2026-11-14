@@ -51,3 +51,38 @@ jobs:
             echo "::error title=Rust tests failed::${details}"
             exit 1
           fi
+
+  android-native:
+    name: Native Android Kotlin + JDK 25
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: 9.9.1
+      - name: Install Android SDK
+        run: sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+      - name: Test and build native Android app
+        run: gradle -p android --no-daemon testDebugUnitTest assembleDebug
+      - name: Verify Kotlin and Java 25 bytecode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("android/app/build")
+          for filename in ("MainActivity.class", "SessionConfig.class"):
+              matches = list(root.rglob(filename))
+              if not matches:
+                  raise SystemExit(f"Missing compiled class: {filename}")
+              versions = {int.from_bytes(path.read_bytes()[6:8], "big") for path in matches}
+              if versions != {69}:
+                  raise SystemExit(f"{filename}: expected Java 25 class version 69, got {sorted(versions)}")
+              print(f"Verified {filename}: Java 25 class version 69")
+          PY

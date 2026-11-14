@@ -12,6 +12,7 @@ const files = [
   'package-lock.json',
   'src-tauri/tauri.conf.json',
   'src-tauri/tauri.android.conf.json',
+  'android/app/build.gradle.kts',
   'src-tauri/Cargo.toml',
   'src-tauri/Cargo.lock',
   'packaging/windows-installer.nsi',
@@ -42,6 +43,9 @@ try {
   assert.equal(packageLock.packages[''].version, '7.8.9');
   assert.equal(tauri.version, '7.8.9');
   assert.equal(android.version, '7.8.9');
+  const nativeAndroid = fs.readFileSync(path.join(workspace, 'android/app/build.gradle.kts'), 'utf8');
+  assert.match(nativeAndroid, /versionCode\s*=\s*7008009/);
+  assert.match(nativeAndroid, /versionName\s*=\s*"7\.8\.9"/);
 
   const cargoToml = fs.readFileSync(path.join(workspace, 'src-tauri/Cargo.toml'), 'utf8');
   const cargoLock = fs.readFileSync(path.join(workspace, 'src-tauri/Cargo.lock'), 'utf8');

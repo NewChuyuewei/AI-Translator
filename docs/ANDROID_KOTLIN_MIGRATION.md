@@ -15,11 +15,12 @@ Desktop platforms keep their existing Tauri/Rust implementation. Android shares 
 
 ## Delivery stages
 
-### Stage 1 — isolate the new Android application
+### Stage 1 — isolate the new Android application (in progress)
 
-- Create a standalone Android module so the rewrite does not depend on Tauri-generated Gradle files.
-- Establish Compose navigation, dependency injection boundaries, settings models, and fake Gemini/audio implementations.
-- Add unit tests and CI checks that inspect Java and Kotlin class-file targets before D8/R8 packaging.
+- The standalone `android/` application no longer depends on Tauri-generated Gradle files, WebView, Rust, or JNI.
+- The initial Compose UI, validated session models, bounded Gemini WebSocket client, Android Keystore secret storage, and bounded PCM queue are implemented.
+- CI runs unit tests, builds the APK with JDK 25, and checks that representative Kotlin classes use class-file major version 69 before accepting D8/R8 output.
+- Native capture, playback, foreground service, overlay, proxy, and physical-device validation remain in the following stages.
 
 ### Stage 2 — native audio and lifecycle
 

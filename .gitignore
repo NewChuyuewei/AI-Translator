@@ -10,3 +10,8 @@ Gemini-Live-Translator-Windows-Setup.exe
 *.keystore
 *.jks
 .env
+
+# Standalone native Android rewrite
+android/.gradle/
+android/**/build/
+android/local.properties
