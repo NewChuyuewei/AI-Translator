@@ -256,6 +256,7 @@ pub fn decode_server_frame(message: Message) -> Result<ServerFrame> {
         }
         Message::Binary(bytes) => {
             if bytes.len() > MAX_SERVER_MESSAGE_BYTES { return Err(anyhow!("Gemini 二进制帧超过大小限制")); }
+            std::str::from_utf8(&bytes).map_err(|_| anyhow!("Gemini 二进制帧不是有效 UTF-8"))?;
             ("二进制", serde_json::from_slice(&bytes).map_err(|e|
                 anyhow!("Gemini 二进制帧不是有效 JSON（行 {}，列 {}）", e.line(), e.column()))?)
         }
