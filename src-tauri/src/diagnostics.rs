@@ -113,7 +113,7 @@ impl Trace {
     fn write(&self, level: &'static str, message: &str) {
         let safe = self.redact(message);
         #[cfg(test)]
-        if let Some(output) = &self.capture { output.lock().unwrap().push(format!("{level}: {safe}")); }
+        if let Some(output) = &self.capture { output.lock().unwrap_or_else(|e| e.into_inner()).push(format!("{level}: {safe}")); }
         if let Some(app) = &self.app {
             let entry = app.state::<LogStore>().push(self.session_id, level, safe);
             // Available when launched from a terminal/logcat; the in-app console
@@ -134,7 +134,7 @@ mod tests {
     fn masks_known_secrets_and_bounds_log_history() {
         let (trace, captured) = Trace::capturing("AIza-fake-secret-123", "http://alice:p%40ssword@127.0.0.1:7890");
         trace.error("server: AIza-fake-secret-123 alice p@ssword p%40ssword\nnext line");
-        let text = captured.lock().unwrap().join("\n");
+        let text = captured.lock().unwrap_or_else(|e| e.into_inner()).join("\n");
         for secret in ["AIza-fake-secret-123", "alice", "p@ssword", "p%40ssword"] { assert!(!text.contains(secret)); }
         assert!(!text.contains('\n')); assert!(text.contains("[已隐藏]"));
         let store = LogStore::default();
