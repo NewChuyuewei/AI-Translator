@@ -42,6 +42,7 @@ class AudioCaptureService : Service() {
             callback?.invoke(error)
         }
         private const val RATE = 16_000
+        private const val FRAME_SAMPLES = 640 // 40 ms; matches the Rust router
         private const val NOTIFICATION_ID = 1101
         private const val CHANNEL_ID = "live_translation"
     }
@@ -138,7 +139,9 @@ class AudioCaptureService : Service() {
     private fun bufferBytes(): Int {
         val minimum = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minimum > 0) { "设备不支持 16 kHz 单声道采集" }
-        return max(minimum * 2, RATE / 5 * 2)
+        // Keep two 40 ms application frames beyond the platform minimum.
+        // The previous 200 ms floor added avoidable capture latency.
+        return max(minimum, FRAME_SAMPLES * 2 * 2)
     }
     private fun checkedRecord(record: AudioRecord, message: String): AudioRecord {
         if (record.state != AudioRecord.STATE_INITIALIZED) {
@@ -162,7 +165,8 @@ class AudioCaptureService : Service() {
     }
     private fun startReader(record: AudioRecord, system: Boolean) {
         Thread({
-            val buffer = ShortArray(1600)
+            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+            val buffer = ShortArray(FRAME_SAMPLES)
             try {
                 while (running.get()) {
                     val n = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)

@@ -2,11 +2,11 @@
 
 > **版权声明**：Copyright © 2026 chuyuewei. All rights reserved. 本软件及项目所有者创作的源代码、界面设计、文档和发布产物归 chuyuewei 所有；未经事先书面许可，不得复制、修改、再分发、出售或用于其他商业产品。第三方组件、服务及商标仍归各自权利人所有并适用其各自许可。完整声明见 [`COPYRIGHT`](COPYRIGHT)。
 
-Tauri 2 + Rust 的实时语音翻译与转写**开发原型**：支持麦克风、系统播放音频和两者混合，向 Gemini Live 发送音频。翻译模型显示原文／译文并可选播放译音；转写模型只显示原文。桌面端有控制面板和置顶透明字幕窗；Android 使用原生前台采集服务和可选的系统悬浮字幕。
+Tauri 2 + Rust 的实时语音翻译与转写**开发原型**：支持麦克风、系统播放音频和两者混合，向 Gemini Live 发送音频。翻译模型显示原文／译文并可选播放译音；转写模型只显示原文。桌面端有控制面板和置顶透明字幕窗；Android 使用原生 Kotlin 前台采集服务和可选的系统悬浮字幕。Android 正分阶段迁移为 Kotlin + Jetpack Compose UI，并保留 Rust 安全核心，计划见 [`docs/ANDROID_KOTLIN_MIGRATION.md`](docs/ANDROID_KOTLIN_MIGRATION.md)。
 
 > **验证范围**：这是开发原型，开发环境没有真实 Gemini API Key，也没有 Windows、macOS 或 Android 真机；新模型、系统代理、音频和界面尚未完成真实服务端及目标设备端到端验证，不承诺任意网络或音频来源均可用。
 >
-> **Android 已知严重问题**：用户报告 0.1.3 ARM64 调试 APK 在 Android 15+（AOSP 和 Xiaomi HyperOS）安装后启动即闪退；尚无崩溃堆栈，根因未知，**0.1.4 及当前 0.1.6 源码都不应被视为已修复闪退**。排查需要手机系统错误报告，详见下方「测试与排障」和 `AI-README.md`。
+> **Android 已知严重问题**：用户报告 0.1.3 ARM64 调试 APK 在 Android 15+（AOSP 和 Xiaomi HyperOS）安装后启动即闪退；尚无崩溃堆栈，根因未知，**0.1.4 及当前 0.2.0 源码都不应被视为已修复闪退**。排查需要手机系统错误报告，详见下方「测试与排障」和 `AI-README.md`。
 
 ## 功能与使用
 
@@ -66,8 +66,9 @@ WSS 使用内置的 WebPKI 根证书，而非自动采用企业自建根证书�
 - 上面两种是**通用实时对话模型而非专用翻译模型**，可能回答、添加内容或识别错语言；双向自动切换依赖模型判断，不是两条独立译流。
 - **3.5 Live Translate**：`models/gemini-3.5-live-translate-preview`。`generationConfig.responseModalities=["AUDIO"]`，`generationConfig.translationConfig.targetLanguageCode` 为唯一目标语言，`echoTargetLanguage=false`。输入和输出音频转写对象位于 `setup` 顶层。界面「中文（简体）」对该模型映射为 `zh-Hans`；不发送思考配置或 3.8 译员指令。
 - **3.5 Transcribe Live**：`models/gemini-3.5-transcribe-live`。请求 `TEXT` 和顶层 `inputAudioTranscription: {languageCodes: [], mode: "VERBATIM" 或 "SMART"}`，空列表表示自动语言检测；不请求译音、输出转写或翻译配置。服务端 `interimInputTranscription` 是可替换的猜测，`inputTranscription` 是权威最终分段；当前字幕只显示最新分段，不保存完整记录。相同消息内同时出现两者时最终结果优先。转写模式的译音播放器不会启动，后端也拒绝不适用的播放／双向参数。
-- 输入音频经 WSS 发送至 Google，统一为 **16 kHz 单声道 PCM16 little-endian**，约 100 ms 一帧；翻译模型的译音为 **24 kHz 单声道 PCM16**。WebSocket 等待 `setupComplete` 后才发送音频；收到 `interrupted` 会清空译音缓冲。
+- 输入音频经 WSS 发送至 Google，统一为 **16 kHz 单声道 PCM16 little-endian**，约 40 ms 一帧；翻译模型的译音为 **24 kHz 单声道 PCM16**。WebSocket 等待 `setupComplete` 后才发送音频；收到 `interrupted` 会清空译音缓冲。
 - 输入设备不同采样率、声道数会在 Rust 中降混和重采样；混合模式为两路各 50%，不足的帧补静音。队列有上限，网络或设备跟不上时可能丢帧；这是低延迟简化实现，不是高保真混音、精密时钟同步或声学回声消除器。
+- Google AI Studio 的 Token/min 配额按 Google 项目在服务端统计，客户端不能绕过或精确替代服务端计数。默认开启“静音时节省 Token”：连续近静音约 1 秒 后停止上传 PCM，检测到讲话后立即恢复，以减少空闲音频的 Token 和带宽消耗。噪声环境可能使静音门保持开启；担心漏掉轻声时可以关闭。收到 HTTP 429 / `RESOURCE_EXHAUSTED` 时应用会显示配额提示，请等待 Google 的配额窗口恢复，不应通过快速重连规避限制。
 - 会话接近到期时服务端可能发送 `goAway`。3.5 Transcribe 官方会话上限为 10 分钟，应用约在连接后 9 分钟提醒；当前版本**不自动续接或恢复上下文**，断开后请手动重新开始。翻译模型字幕分片的合并是启发式处理。转写模型不支持说话人分离和逐词时间戳。模型可用性、延迟、配额和费用取决于 Google 账户及服务。
 
 ## 平台音频与权限
@@ -81,7 +82,7 @@ WSS 使用内置的 WebPKI 根证书，而非自动采用企业自建根证书�
 
 ### Android 重要说明
 
-插件清单声明 `RECORD_AUDIO`、`CAPTURE_AUDIO_OUTPUT`、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_MICROPHONE`、`FOREGROUND_SERVICE_MEDIA_PROJECTION`、`POST_NOTIFICATIONS`、`WAKE_LOCK` 和 `SYSTEM_ALERT_WINDOW` 等。**`CAPTURE_AUDIO_OUTPUT` 是系统/特权权限，普通第三方应用即使在 manifest 中声明也无法获得；本项目不依赖它实现内录。**内录走官方允许的用户授权 `MediaProjection` + `AudioPlaybackCapture`，并不绕过其他应用的捕获策略。
+插件清单声明 `RECORD_AUDIO`、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_MICROPHONE`、`FOREGROUND_SERVICE_MEDIA_PROJECTION`、`POST_NOTIFICATIONS`、`WAKE_LOCK` 和 `SYSTEM_ALERT_WINDOW` 等。内录只走官方允许的用户授权 `MediaProjection` + `AudioPlaybackCapture`；不请求普通第三方应用无法获得的 `CAPTURE_AUDIO_OUTPUT` 特权权限，也不绕过其他应用的捕获策略。
 
 前台服务在可见 Activity 中由用户启动，显示持续通知；Android 13+ 若通知权限被拒绝，其可见性取决于系统。Android 14+ 对麦克风 while-in-use 和投影前台服务的启动顺序、后台启动有严格限制。服务为非 sticky，并持有最多 30 分钟的 wake lock：切应用、锁屏、被系统回收、厂商省电或强制停止后**不保证持续运行或自动恢复**。需用真实设备测试，且不能保证在锁屏界面显示悬浮字幕。
 
@@ -140,7 +141,7 @@ npm run tauri build     # 本机平台 release 构建和打包
 
 ### 本次 Windows 交付物
 
-本次提供的 Windows **0.1.4** 构建面向 **Windows 10/11 x64**，需要 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。安装版为当前用户安装到本地应用目录，可选择路径，创建开始菜单快捷方式和卸载入口，无需管理员权限。免安装版须完整解压后运行其中的 `Gemini-Live-Translator.exe`，**`WebView2Loader.dll` 必须与主程序位于同一目录**。安装版与主程序均未签名，可能触发 Windows SmartScreen 提示。
+Windows **0.2.0** 源码面向 **Windows 10/11 x64**，需要 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。安装版为当前用户安装到本地应用目录，可选择路径，创建开始菜单快捷方式和卸载入口，无需管理员权限。免安装版须完整解压后运行其中的 `Gemini-Live-Translator.exe`，**`WebView2Loader.dll` 必须与主程序位于同一目录**。安装版与主程序均未签名，可能触发 Windows SmartScreen 提示。
 
 本构建使用 Linux 到 `x86_64-pc-windows-gnu` 的交叉编译，已静态检查 PE 格式、导入项、模型 ID 和安装包载荷；没有 Windows 真机验证，也没有真实 API Key 联调。特别是麦克风、WASAPI 系统回录、悬浮窗、F8 和 WebView2 行为仍需在目标设备验证。
 
@@ -171,13 +172,13 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 - `.github/workflows/ci.yml`：推送到 `main`／`arena/**`、Pull Request 或手动触发时，执行前端构建、JSDOM 测试和锁定依赖的 Rust 单元测试。
 - `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK；全部成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
 
-发布前应先同步 `package.json`、Cargo、Tauri 和安装脚本版本，再创建同版本标签，例如 `git tag v0.1.6 && git push origin v0.1.6`。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
+当前源码基准版本为 `0.2.0`。发布工作流支持自定义严格三段式版本：在 Actions 手动运行时填写 `vMAJOR.MINOR.PATCH`（例如 `v0.2.1`），工作流会在各个隔离的构建任务中运行 `node scripts/set-version.mjs MAJOR.MINOR.PATCH`，同步 npm、Cargo、Tauri、Android、NSIS 和便携版产物版本；不会把临时版本改写提交回仓库。也可以推送同格式标签触发。正式源码升级可在本地运行该脚本后提交。预发布后缀目前不支持，以免生成无效的 Windows 四段数字版本资源。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
 
 ## Android 构建与安装
 
-本次构建的 APK 是 **Android 0.1.4（versionCode 1004）调试版**，仅含 `arm64-v8a`，最低 Android 8.0/API 26；系统音频捕获需要 Android 10/API 29 及以上。除原有功能外，该版本包含 3.5 Live Translate 和仅原文的 Transcribe Live。已检查其证书与此前的 0.1.3 调试包相同，通常可直接覆盖安装；其他签名的同包名版本可能无法覆盖，卸载会删除应用数据。
+当前源码版本为 **0.2.0**；发布工作流生成仅含 `arm64-v8a` 的 Android debug APK，最低 Android 8.0/API 26，系统音频捕获需要 Android 10/API 29 及以上。APK 的实际 `versionCode` 由当前 Tauri Android 模板生成，应以构建产物清单为准。调试签名可能随构建环境变化；签名不同的 APK 无法覆盖安装，卸载会删除应用数据。
 
-**重要：0.1.3 在部分 Android 15+ 手机上启动即闪退的原因尚未知；0.1.4 未在这些手机上验证，也不能保证解决。**建议保留旧版和相关数据，并提供脱敏后的系统崩溃堆栈供进一步排查。
+**重要：0.1.3 在部分 Android 15+ 手机上启动即闪退的原因尚未知；当前 0.2.0 源码未在这些手机上验证，也不能保证解决。**建议保留旧版和相关数据，并提供脱敏后的系统崩溃堆栈供进一步排查。
 
 这是开发用 debug 包，可调试且允许明文网络流量配置，不应用于正式发布。Gemini 音频连接本身使用加密 WSS。源码包不包含调试 keystore：自行在另一台电脑构建的 APK 通常会使用不同的签名，因而可能无法覆盖此前安装的版本。
 
@@ -223,7 +224,7 @@ cargo test --lib --locked
 
 0.1.4 已执行：前端构建和 JSDOM 控制台／字幕窗模拟交互测试通过；Linux Rust 测试 **30/30** 通过，包含两种 3.5 模型 setup、转写临时／最终分段、转写模式安全限制、模拟 WebSocket、文本与二进制 `setupComplete`、代理、取消、TLS 证书和错误脱敏。Windows x64 release 交叉编译和安装包载荷检查通过；Android ARM64 Rust、Kotlin/Gradle debug APK 已构建，签名、架构、版本和 16 KB ZIP 对齐已静态检查。这些只能验证本机代码、打包与模拟协议，不能替代真实设备及 Gemini 服务端联调；目标平台的系统代理/VPN、音频、窗口、系统授权、Android 剪贴板和 Gemini 端到端均**未验证**。Android 15+ 闪退问题仍待真实崩溃堆栈。
 
-- **Android 15+ 安装后立即闪退**：用户已报告 0.1.3 问题，尚无堆栈和根因，0.1.4 尚不能视为修复。如果只有手机，可先触发闪退，然后在系统「开发者选项」中生成完整错误报告（不同厂商菜单不同）。报告可能包含设备标识、账号及其他隐私信息；先自行检查并遮盖，只分享 `com.gemini.live.translator` 相关的 `FATAL EXCEPTION`、`Caused by`、`Fatal signal` 或 tombstone 附近堆栈。应用没打开时控制面板的连接诊断日志无法捕获启动前闪退。请勿发送 API Key、代理密码或完整未经检查的报告。
+- **Android 15+ 安装后立即闪退**：用户已报告 0.1.3 问题，尚无堆栈和根因，当前 0.2.0 源码尚不能视为修复。如果只有手机，可先触发闪退，然后在系统「开发者选项」中生成完整错误报告（不同厂商菜单不同）。报告可能包含设备标识、账号及其他隐私信息；先自行检查并遮盖，只分享 `com.gemini.live.translator` 相关的 `FATAL EXCEPTION`、`Caused by`、`Fatal signal` 或 tombstone 附近堆栈。应用没打开时控制面板的连接诊断日志无法捕获启动前闪退。请勿发送 API Key、代理密码或完整未经检查的报告。
 - **连接失败 / 模型不可用**：检查网络、API Key、所在区域、账户模型权限和当前 [Live API 文档](https://ai.google.dev/gemini-api/docs/live-api)。本项目没有自动切换模型。
 - **自动代理未识别或不能连接**：确认代理软件确实开启了系统代理，或 VPN 的分应用规则包含本程序；查看面板的选定路径。PAC 检测失败可手动填 HTTP/SOCKS5 地址；手机上的 `127.0.0.1` 不是电脑。确认代理监听端口、本机防火墙、凭据和目标站点规则；如果证书失败请检查代理是否做 TLS 解密，不要关闭证书校验。
 - **Android 构建提示找不到 `TauriActivity`**：若重建过 `gen/android` 或多个项目共用了 `CARGO_TARGET_DIR`，旧的 Tauri/Wry 缓存可能没有把 Kotlin 文件生成到新目录。运行 `cargo clean --manifest-path src-tauri/Cargo.toml -p tauri -p wry --target aarch64-linux-android`，然后重新执行 Android 构建；其他 ABI 改用对应 Rust target。

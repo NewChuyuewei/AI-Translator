@@ -1,7 +1,6 @@
 //! PCM routing shared by desktop and Android.
-//! Input callbacks never block on networking. A bounded queue and a 100 ms
-//! mixing clock prevent either a silent source or a slow connection from
-//! growing memory without bound.
+//! Input callbacks never block on networking. Bounded queues and a 40 ms
+//! mixing clock cap memory use while keeping capture-to-network latency low.
 use anyhow::Result;
 #[cfg(not(target_os = "android"))]
 use anyhow::{anyhow, Context};
@@ -11,8 +10,13 @@ use std::{collections::VecDeque, sync::{atomic::{AtomicBool, Ordering}, Arc}, th
 use tokio::sync::mpsc;
 
 pub const SAMPLE_RATE: u32 = 16_000;
-pub const FRAME_SAMPLES: usize = 1_600; // 100 ms, as recommended for Live Translate
+pub const FRAME_DURATION: Duration = Duration::from_millis(40);
+pub const FRAME_SAMPLES: usize = 640;
+// Retain at most 160 ms per source. If a producer outruns the network, prefer
+// recent speech over stale audio so latency cannot grow without bound.
 const MAX_BUFFERED_SAMPLES: usize = FRAME_SAMPLES * 4;
+const SILENCE_RMS_THRESHOLD: f32 = 0.003;
+const SILENCE_HANGOVER_FRAMES: u16 = 25; // 1 s preserves server VAD turn endings
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,11 +100,32 @@ fn pcm16(samples: impl IntoIterator<Item=f32>) -> Vec<u8> {
     }
     out
 }
-fn process_audio(mode: AudioSourceMode, rx: Receiver<RawAudio>, tx: mpsc::Sender<Vec<u8>>, stop: Arc<AtomicBool>) {
+fn frame_rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() { return 0.0; }
+    (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+#[derive(Default)]
+struct SilenceGate { quiet_frames: u16 }
+impl SilenceGate {
+    fn should_send(&mut self, samples: &[f32], enabled: bool) -> bool {
+        if !enabled { return true; }
+        if frame_rms(samples) >= SILENCE_RMS_THRESHOLD {
+            self.quiet_frames = 0;
+            true
+        } else {
+            self.quiet_frames = self.quiet_frames.saturating_add(1);
+            self.quiet_frames <= SILENCE_HANGOVER_FRAMES
+        }
+    }
+}
+
+fn process_audio(mode: AudioSourceMode, rx: Receiver<RawAudio>, tx: mpsc::Sender<Vec<u8>>, stop: Arc<AtomicBool>, token_saver: bool) {
     let mut mic = VecDeque::new(); let mut system = VecDeque::new();
     let mut mic_resample: Option<(u32, Resampler)> = None;
     let mut sys_resample: Option<(u32, Resampler)> = None;
-    let mut next = Instant::now() + Duration::from_millis(100);
+    let mut next = Instant::now() + FRAME_DURATION;
+    let mut silence_gate = SilenceGate::default();
     while !stop.load(Ordering::Acquire) {
         let wait = next.saturating_duration_since(Instant::now()).min(Duration::from_millis(20));
         if let Ok(chunk) = rx.recv_timeout(wait) {
@@ -128,11 +153,16 @@ fn process_audio(mode: AudioSourceMode, rx: Receiver<RawAudio>, tx: mpsc::Sender
                 };
                 out.push(v.clamp(-1.0, 1.0));
             }
-            if tx.try_send(pcm16(out)).is_err() && tx.is_closed() { break; }
-            next += Duration::from_millis(100);
-            // Don't send a burst after a scheduler stall.
-            if Instant::now().duration_since(next.min(Instant::now())) > Duration::from_millis(300) {
-                next = Instant::now() + Duration::from_millis(100);
+            // AI Studio quotas are project-wide and server-enforced. Omitting
+            // sustained near-silence cannot bypass the quota, but avoids paying
+            // audio-token and bandwidth cost while nobody is speaking.
+            if silence_gate.should_send(&out, token_saver)
+                && tx.try_send(pcm16(out)).is_err() && tx.is_closed() { break; }
+            next += FRAME_DURATION;
+            // Don't send a burst after a scheduler stall. One late frame is
+            // useful; replaying a backlog only increases perceived latency.
+            if Instant::now().duration_since(next.min(Instant::now())) > FRAME_DURATION * 3 {
+                next = Instant::now() + FRAME_DURATION;
             }
         }
     }
@@ -140,10 +170,12 @@ fn process_audio(mode: AudioSourceMode, rx: Receiver<RawAudio>, tx: mpsc::Sender
 
 pub struct AudioRouter { pub raw_sender: Sender<RawAudio>, stop: Arc<AtomicBool>, threads: Vec<thread::JoinHandle<()>> }
 impl AudioRouter {
-    pub fn new(mode: AudioSourceMode, pcm: mpsc::Sender<Vec<u8>>) -> Self {
-        let (raw_sender, rx) = bounded(64);
+    pub fn new(mode: AudioSourceMode, pcm: mpsc::Sender<Vec<u8>>, token_saver: bool) -> Self {
+        // Twelve typical chunks are enough to absorb scheduler jitter without
+        // allowing seconds of stale microphone data to accumulate.
+        let (raw_sender, rx) = bounded(12);
         let stop = Arc::new(AtomicBool::new(false)); let worker_stop = stop.clone();
-        let worker = thread::spawn(move || process_audio(mode, rx, pcm, worker_stop));
+        let worker = thread::spawn(move || process_audio(mode, rx, pcm, worker_stop, token_saver));
         Self { raw_sender, stop, threads: vec![worker] }
     }
     #[cfg(not(target_os = "android"))]
@@ -271,6 +303,21 @@ pub fn list_devices() -> Result<AudioDevices> {
         assert_eq!(reference.len(), divided.len());
         assert!(reference.iter().zip(divided.iter()).all(|(a,b)| (a-b).abs()<1e-6));
         assert!((1598..=1601).contains(&reference.len()));
+    }
+    #[test] fn low_latency_frame_is_40_ms() {
+        assert_eq!(FRAME_SAMPLES as u32 * 1_000 / SAMPLE_RATE, 40);
+        assert_eq!(FRAME_DURATION, Duration::from_millis(40));
+    }
+    #[test] fn token_saver_keeps_speech_and_suppresses_sustained_silence() {
+        assert_eq!(u32::from(SILENCE_HANGOVER_FRAMES) * 40, 1_000);
+        let mut gate = SilenceGate::default();
+        let silence = vec![0.0; FRAME_SAMPLES];
+        for _ in 0..SILENCE_HANGOVER_FRAMES { assert!(gate.should_send(&silence, true)); }
+        assert!(!gate.should_send(&silence, true));
+        assert!(gate.should_send(&vec![0.02; FRAME_SAMPLES], true));
+        assert!(gate.should_send(&silence, true));
+        let mut disabled = SilenceGate::default();
+        for _ in 0..100 { assert!(disabled.should_send(&silence, false)); }
     }
     #[test] fn stereo_downmix_and_clipping() {
         assert_eq!(downmix(&[1.0,-1.0,0.5,0.5],2), vec![0.0,0.5]);

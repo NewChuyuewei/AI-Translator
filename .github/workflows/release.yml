@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag, for example v0.1.6
+        description: Custom release tag (vMAJOR.MINOR.PATCH), for example v0.2.1
         required: true
         type: string
       prerelease:
@@ -46,6 +46,8 @@ jobs:
             bundles: deb,appimage
             artifact: linux-x64
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -56,6 +58,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Apply custom release version
+        shell: bash
+        run: |
+          test "${RELEASE_TAG}" = "v${RELEASE_TAG#v}" || { echo "Release tag must start with v"; exit 1; }
+          node scripts/set-version.mjs "${RELEASE_TAG#v}"
       - name: Verify macOS 26 SDK toolchain
         if: runner.os == 'macOS'
         run: |
@@ -115,6 +122,8 @@ jobs:
   android:
     name: Android ARM64 debug APK
     runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -137,6 +146,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Apply custom release version
+        run: |
+          test "${RELEASE_TAG}" = "v${RELEASE_TAG#v}" || { echo "Release tag must start with v"; exit 1; }
+          node scripts/set-version.mjs "${RELEASE_TAG#v}"
       - name: Install Android SDK and NDK
         run: sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;36.0.0" "build-tools;37.0.0" "ndk;28.2.13676358"
       - run: npm ci
@@ -145,8 +158,6 @@ jobs:
       - name: Build ARM64 debug APK
         run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npx tauri android build --debug --apk --target aarch64 --ci
       - name: Stage APK
-        env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
         run: |
           mkdir -p release-assets
           VERSION="${RELEASE_TAG#v}"
@@ -171,10 +182,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
-      - name: Verify tag matches package version
+      - name: Validate and apply custom release version
         run: |
-          VERSION="$(node -p 'require("./package.json").version')"
-          test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Tag ${RELEASE_TAG} does not match v${VERSION}"; exit 1; }
+          VERSION="${RELEASE_TAG#v}"
+          node scripts/set-version.mjs "$VERSION"
+          test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Release tag must use vMAJOR.MINOR.PATCH"; exit 1; }
       - uses: actions/download-artifact@v8
         with:
           path: release-assets

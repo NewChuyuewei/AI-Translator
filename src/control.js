@@ -113,6 +113,7 @@ function collectOptions() {
     systemDevice: $('system-device').value || null,
     playbackEnabled: !transcribe && $('playback-enabled').checked,
     playbackDevice: transcribe ? null : ($('playback-device').value || null),
+    tokenSaver: $('token-saver').checked,
     proxyMode: $('proxy-mode').value,
     proxyUrl: $('proxy-mode').value === 'manual' ? $('proxy-url').value.trim() : '',
     overlayScale: Number($('overlay-scale').value) / 100,
@@ -172,6 +173,7 @@ function applySavedSettings(saved) {
   ]) setSelectValue(id, value);
   $('bidirectional').checked = !!options.bidirectional;
   $('playback-enabled').checked = !!options.playbackEnabled;
+  $('token-saver').checked = options.tokenSaver !== false;
   renderScale(options.overlayScale || 1);
   $('proxy-url').value = options.proxyUrl || '';
   const mode = [...document.querySelectorAll('input[name=mode]')].find(input => input.value === options.mode);
@@ -289,7 +291,7 @@ $('overlay-permission').addEventListener('click', async () => {
   try { await invoke('request_overlay_permission'); toast('已获得悬浮窗权限；正在运行时可解锁并移动字幕。'); } catch (e) { toast(e); }
 });
 $('quit').addEventListener('click', () => isTauri ? invoke('quit_app') : toast('浏览器预览无需退出'));
-for (const id of ['model','thinking-level','transcription-mode','target','bidirectional','other-language','microphone-device','system-device','playback-enabled','playback-device']) {
+for (const id of ['model','thinking-level','transcription-mode','target','bidirectional','other-language','microphone-device','system-device','token-saver','playback-enabled','playback-device']) {
   $(id).addEventListener('change', () => { updateModel(); rememberOptions(); scheduleReconfigure(); });
 }
 $('api-key').addEventListener('input', () => {
