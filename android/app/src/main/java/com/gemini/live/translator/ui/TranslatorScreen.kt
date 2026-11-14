@@ -135,7 +135,7 @@ fun TranslatorScreen(viewModel: MainViewModel) {
                     SelectionCard(
                         title = mode.displayName,
                         description = when (mode) {
-                            GeminiMode.GENERAL_LIVE -> "通用低延迟译员模式，按指令翻译到目标语言"
+                            GeminiMode.GENERAL_LIVE -> "通用译员模式；连续讲话时可能等待语义边界"
                             GeminiMode.EXTENDED_THINKING -> "增强推理译员模式，质量更高但可能增加延迟"
                             GeminiMode.LIVE_TRANSLATE -> "专用单目标语言翻译，显示原文与译文"
                             GeminiMode.LIVE_TRANSCRIBE -> "只显示识别原文，不翻译、不播放译音"

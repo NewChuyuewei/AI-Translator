@@ -686,6 +686,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
     let mut last_interaction_status = None;
     let mut seen_frames = HashSet::new();
     let (mut sent_audio, mut seen_input, mut seen_output, mut seen_audio) = (false, false, false, false);
+    let streaming_at = Instant::now();
     // Count from setupComplete, not from the end of an Android permission dialog.
     let expiry_warning = tokio::time::sleep_until(connected_at + std::time::Duration::from_secs(9 * 60));
     tokio::pin!(expiry_warning);
@@ -741,9 +742,15 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
                     Ok(p) => p,
                     Err(e) => { trace.error(format!("Gemini 消息处理失败：{}", e)); break Err(e); },
                 };
-                if (parsed.input.is_some() || parsed.interim_input.is_some()) && !seen_input { trace.info("已收到输入转写（内容未记录）"); seen_input = true; }
-                if !transcription_only && parsed.output.is_some() && !seen_output { trace.info("已收到输出转写（内容未记录）"); seen_output = true; }
-                if !transcription_only && !parsed.audio.is_empty() && !seen_audio { trace.info("已收到译音（内容未记录）"); seen_audio = true; }
+                if (parsed.input.is_some() || parsed.interim_input.is_some()) && !seen_input {
+                    trace.info(format!("已收到输入转写，距音频启动 {} ms（内容未记录）", streaming_at.elapsed().as_millis())); seen_input = true;
+                }
+                if !transcription_only && parsed.output.is_some() && !seen_output {
+                    trace.info(format!("已收到首段翻译，距音频启动 {} ms（内容未记录）", streaming_at.elapsed().as_millis())); seen_output = true;
+                }
+                if !transcription_only && !parsed.audio.is_empty() && !seen_audio {
+                    trace.info(format!("已收到首段译音，距音频启动 {} ms（内容未记录）", streaming_at.elapsed().as_millis())); seen_audio = true;
+                }
                 if parsed.go_away { trace.warn("Gemini 提示会话即将到期"); let _ = app.emit("session-notice", "Gemini 提示会话即将到期；连接结束后请重新启动"); }
                 if options.model == ModelKind::ExtendedThinking {
                     if let Some(state) = parsed.interaction_status {
