@@ -124,7 +124,9 @@ plugins/mobile-audio/
 
 ## 通用依赖与桌面构建
 
-安装 Node.js 20+、npm、Rust stable（使用较新的 stable；项目锁文件在 Rust 1.100 测试），以及 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)。在项目根目录：
+当前稳定技术栈版本、升级依据和暂缓的破坏性升级见 [`docs/TECH_STACK.md`](docs/TECH_STACK.md)。
+
+安装 Node.js 22.22.2+（22.x）或 24.15.0+、npm、Rust stable（项目声明最低 Rust 1.90，锁文件在 Rust 1.100 测试），以及 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)。在项目根目录：
 
 ```bash
 npm ci
@@ -170,9 +172,9 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 ### GitHub Actions 自动构建与发布
 
 - `.github/workflows/ci.yml`：推送到 `main`／`arena/**`、Pull Request 或手动触发时，执行前端构建、JSDOM 测试和锁定依赖的 Rust 单元测试。
-- `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK；全部成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
+- `.github/workflows/release.yml`：推送 `v*` 标签或手动填写标签时，在原生 runner 构建 Windows x64 NSIS 安装包与便携 ZIP、macOS Apple Silicon DMG、Linux x64 DEB/AppImage，以及 Android ARM64 debug APK。手动运行可选择 `build_only`（只保留 Actions 构建产物）、`prerelease`（发布 GitHub 预发布）或 `release`（发布正式版本）；推送标签默认发布正式版本。发布模式会在全部平台成功后生成 SHA-256 校验文件并创建或更新 GitHub Release。
 
-当前源码基准版本为 `0.2.0`。发布工作流支持自定义严格三段式版本：在 Actions 手动运行时填写 `vMAJOR.MINOR.PATCH`（例如 `v0.2.1`），工作流会在各个隔离的构建任务中运行 `node scripts/set-version.mjs MAJOR.MINOR.PATCH`，同步 npm、Cargo、Tauri、Android、NSIS 和便携版产物版本；不会把临时版本改写提交回仓库。也可以推送同格式标签触发。正式源码升级可在本地运行该脚本后提交。预发布后缀目前不支持，以免生成无效的 Windows 四段数字版本资源。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
+当前源码基准版本为 `0.2.0`。手动运行默认选择安全的 `build_only`，不会创建 GitHub Release；确认产物后可用同一版本选择预发布或正式发布。发布工作流支持自定义严格三段式版本：在 Actions 手动运行时填写 `vMAJOR.MINOR.PATCH`（例如 `v0.2.1`），工作流会在各个隔离的构建任务中运行 `node scripts/set-version.mjs MAJOR.MINOR.PATCH`，同步 npm、Cargo、Tauri、Android、NSIS 和便携版产物版本；不会把临时版本改写提交回仓库。也可以推送同格式标签触发。正式源码升级可在本地运行该脚本后提交。预发布后缀目前不支持，以免生成无效的 Windows 四段数字版本资源。当前工作流没有代码签名证书或 Android release keystore，因此桌面产物未签名，Android 产物明确为 **debug 开发包**；不得冒充应用商店或生产发布包。首次使用应在仓库 Actions 页面观察完整运行结果，目标平台失败时按 runner 日志调整依赖或签名配置。
 
 ## Android 构建与安装
 
@@ -182,7 +184,7 @@ GNU 版本必须携带 DLL；上面的安装程序包含该 DLL，但不包含 W
 
 这是开发用 debug 包，可调试且允许明文网络流量配置，不应用于正式发布。Gemini 音频连接本身使用加密 WSS。源码包不包含调试 keystore：自行在另一台电脑构建的 APK 通常会使用不同的签名，因而可能无法覆盖此前安装的版本。
 
-源码包不包含生成目录 `src-tauri/gen/`、已下载的 SDK/NDK、`node_modules/` 或构建产物；这些要在本机生成。准备 Android Studio、JDK 21、SDK Platform-Tools、SDK 平台、Build Tools 和 NDK。使用本项目锁定的 Tauri CLI 初始化时，本次生成的工程使用 `compileSdk/targetSdk 37`，插件使用 `compileSdk 36`；建议在 SDK Manager 中安装 API 36、37 和相应 Build Tools，以及 NDK 28.2.13676358。Android 版本号由 `src-tauri/tauri.android.conf.json` 覆盖；版本或 Tauri 模板升级后以生成工程为准。
+源码包不包含生成目录 `src-tauri/gen/`、已下载的 SDK/NDK、`node_modules/` 或构建产物；这些要在本机生成。Actions 初始化工程后会运行 `scripts/configure-android-gradle.mjs`：删除已弃用且降低校验强度的 `android.proguard.failOnMissingFiles=false`，将生成应用的 `android {}` 迁移到公开 `ApplicationExtension`，并仅抑制 Tauri 2 当前仍需要的 AGP 兼容选项／旧 variant DSL 迁移提示，不会全局关闭 Gradle 或 Kotlin 警告。项目自己的 mobile-audio 插件已改用公开 `LibraryExtension`、Java 25 和类型安全的 Kotlin `compilerOptions`。生成的 Tauri Kotlin 文件只对其文件内的旧 Android 兼容调用使用 `DEPRECATION` 豁免，项目 Kotlin 代码的其他警告仍保持可见；JDK 25 编译 Tauri 的 Java 8 兼容模块所产生的 source/target 提示按 AGP 官方属性精确抑制。Cargo 依赖内 Tauri 自身的 Kotlin 源码仍可能报告上游生命周期 API／Java 类型提示，需等待 Tauri 模板升级，项目不会修改 Cargo registry 中的第三方源码来隐藏它。Java/Kotlin 25 会生成 class-file version 69，能否被当前 AGP、D8/R8 和最低 API 26 完整处理必须以 Actions 与真机结果为准；若 D8 拒绝，应保留 JDK 25 运行构建但将字节码目标退回 17。准备 Android Studio、JDK 25、SDK Platform-Tools、SDK 平台、Build Tools 和 NDK。使用本项目锁定的 Tauri CLI 初始化时，本次生成的工程使用 `compileSdk/targetSdk 37`，插件使用 `compileSdk 37`；建议在 SDK Manager 中安装 API 36、37 和相应 Build Tools，以及 NDK 28.2.13676358。Android 版本号由 `src-tauri/tauri.android.conf.json` 覆盖；版本或 Tauri 模板升级后以生成工程为准。
 
 macOS / Linux 示例（按本机目录调整）：
 

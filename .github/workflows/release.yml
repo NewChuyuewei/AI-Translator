@@ -9,11 +9,15 @@ on:
         description: Custom release tag (vMAJOR.MINOR.PATCH), for example v0.2.1
         required: true
         type: string
-      prerelease:
-        description: Mark the GitHub release as a prerelease
+      release_mode:
+        description: Choose whether to keep artifacts only, publish a prerelease, or publish a stable release
         required: true
-        default: true
-        type: boolean
+        default: build_only
+        type: choice
+        options:
+          - build_only
+          - prerelease
+          - release
 
 permissions:
   contents: read
@@ -133,7 +137,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 25
       - uses: android-actions/setup-android@v4
         with:
           # Install command-line tools and accept licenses here; the exact SDK,
@@ -155,6 +159,8 @@ jobs:
       - run: npm ci
       - name: Initialize generated Android project
         run: npx tauri android init --ci
+      - name: Configure generated Android project
+        run: node scripts/configure-android-gradle.mjs
       - name: Build ARM64 debug APK
         run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npx tauri android build --debug --apk --target aarch64 --ci
       - name: Stage APK
@@ -172,13 +178,14 @@ jobs:
 
   publish:
     name: Publish GitHub release
+    if: github.event_name == 'push' || inputs.release_mode != 'build_only'
     needs: [desktop, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-      PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+      RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_mode || 'release' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
@@ -200,8 +207,11 @@ jobs:
         shell: bash
         run: |
           flags=(--title "Gemini Live Translator ${RELEASE_TAG}" --generate-notes --target "${GITHUB_SHA}")
-          if [[ "${PRERELEASE}" == "true" ]]; then flags+=(--prerelease); fi
+          prerelease=false
+          if [[ "${RELEASE_MODE}" == "prerelease" ]]; then flags+=(--prerelease); prerelease=true; fi
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" --title "Gemini Live Translator ${RELEASE_TAG}" \
+              --target "${GITHUB_SHA}" --prerelease="${prerelease}"
             gh release upload "${RELEASE_TAG}" release-assets/* --clobber
           else
             gh release create "${RELEASE_TAG}" release-assets/* "${flags[@]}"

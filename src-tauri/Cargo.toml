@@ -12,32 +12,34 @@ name = "gemini_live_translator_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
 # Tauri 2.12.1+ enables macOS transparent-window support without a per-target feature toggle.
-tauri = { version = "2.12.1", features = [] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+tauri = { version = "2.12.5", features = [] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+# 0.27+ contains breaking transport API changes; retain the CI-verified line until migration tests can run locally.
+tokio-tungstenite = { version = "0.26.2", features = ["rustls-tls-webpki-roots"] }
 # tungstenite disables rustls defaults; explicitly install a crypto provider for WSS.
-rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
-futures-util = "0.3"
-anyhow = "1"
-base64 = "0.22"
-ring = "0.17"
-url = "2"
-percent-encoding = "2"
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+futures-util = "0.3.34"
+anyhow = "1.0.104"
+base64 = "0.22.1"
+ring = "0.17.14"
+url = "2.5.8"
+percent-encoding = "2.3.2"
+# CPAL 0.16+ is a breaking backend migration across all desktop targets; defer until physical-device CI is available.
 cpal = "0.15.3"
-crossbeam-channel = "0.5"
+crossbeam-channel = "0.5.17"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Desktop OS proxy settings, bypass rules and PAC/WPAD resolution.
 proxyres = "=1.5.7"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-global-shortcut = "2"
+tauri-plugin-global-shortcut = "2.4.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-mobile-audio = { path = "../plugins/mobile-audio" }
@@ -46,8 +48,8 @@ tauri-plugin-mobile-audio = { path = "../plugins/mobile-audio" }
 screencapturekit = { version = "11.1.2", features = ["macos_13_0"] }
 
 [dev-dependencies]
-rcgen = { version = "0.14", default-features = false, features = ["ring"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 
 [features]
 default = ["custom-protocol"]

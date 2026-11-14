@@ -5,19 +5,23 @@
   "author": "chuyuewei",
   "license": "UNLICENSED",
   "type": "module",
+  "engines": {
+    "node": "^22.22.2 || >=24.15.0"
+  },
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 1420 --strictPort",
     "build": "vite build",
     "tauri": "tauri",
     "test:ui": "node tests/ui_mock_test.mjs && node tests/overlay_mock_test.mjs",
-    "test:version": "node tests/version_script_test.mjs"
+    "test:version": "node tests/version_script_test.mjs",
+    "test:android-config": "node tests/android_gradle_config_test.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.0"
+    "@tauri-apps/api": "^2.12.4"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
-    "jsdom": "^24.1.3",
-    "vite": "^6.0.0"
+    "@tauri-apps/cli": "^2.12.4",
+    "jsdom": "^31.0.1",
+    "vite": "^8.3.8"
   }
 }
