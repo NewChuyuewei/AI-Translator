@@ -50,6 +50,9 @@ class MainViewModel(
         viewModelScope.launch {
             runtime.caption.collect { caption -> mutableState.update { it.copy(caption = caption) } }
         }
+        viewModelScope.launch {
+            runtime.overlayEnabled.collect { enabled -> mutableState.update { it.copy(overlayEnabled = enabled) } }
+        }
     }
 
     fun setApiKey(value: String) = mutableState.update { it.copy(apiKey = value.take(512)) }

@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 class OverlayCaptionController(
     private val context: Context,
     private val onStopSession: () -> Unit,
+    private val onDismiss: () -> Unit,
 ) {
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private var root: LinearLayout? = null
@@ -39,8 +40,7 @@ class OverlayCaptionController(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -69,7 +69,10 @@ class OverlayCaptionController(
         val collapse = actionButton("↙", "收起或展开悬浮字幕") { toggleCollapsed() }
         header.addView(collapse)
         header.addView(actionButton("■", "停止翻译会话") { onStopSession() })
-        header.addView(actionButton("×", "关闭悬浮字幕") { hide() })
+        header.addView(actionButton("×", "关闭悬浮字幕") {
+            onDismiss()
+            hide()
+        })
         installDrag(header)
         panel.addView(header, LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
 
@@ -129,11 +132,17 @@ class OverlayCaptionController(
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - downX).roundToInt()
-                    params.y = (initialY + (event.rawY - downY).roundToInt()).coerceAtLeast(0)
-                    root?.let { runCatching { windowManager.updateViewLayout(it, params) } }
+                    val view = root ?: return@setOnTouchListener false
+                    val metrics = context.resources.displayMetrics
+                    val panelWidth = view.width.takeIf { it > 0 } ?: params.width
+                    val maxX = ((metrics.widthPixels - panelWidth) / 2).coerceAtLeast(0)
+                    val maxY = (metrics.heightPixels - view.height - dp(24)).coerceAtLeast(0)
+                    params.x = (initialX + (event.rawX - downX).roundToInt()).coerceIn(-maxX, maxX)
+                    params.y = (initialY + (event.rawY - downY).roundToInt()).coerceIn(0, maxY)
+                    runCatching { windowManager.updateViewLayout(view, params) }
                     true
                 }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
                 else -> false
             }
         }

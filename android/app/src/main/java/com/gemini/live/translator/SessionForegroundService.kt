@@ -28,7 +28,11 @@ class SessionForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        overlay = OverlayCaptionController(this) { runtime.stop() }
+        overlay = OverlayCaptionController(
+            context = this,
+            onStopSession = { runtime.stop() },
+            onDismiss = { runtime.setOverlayEnabled(false) },
+        )
         scope.launch {
             runtime.session.collect { state ->
                 val text = when (state) {

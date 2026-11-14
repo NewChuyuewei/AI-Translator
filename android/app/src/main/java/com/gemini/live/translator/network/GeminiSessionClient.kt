@@ -5,8 +5,9 @@ import com.gemini.live.translator.data.CaptionState
 import com.gemini.live.translator.data.GeminiMode
 import com.gemini.live.translator.data.SessionConfig
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -21,7 +22,8 @@ import java.util.concurrent.atomic.AtomicReference
 import android.util.Base64
 
 interface SessionClient {
-    val events: SharedFlow<ClientEvent>
+    val events: Flow<ClientEvent>
+    val audio: Flow<ByteArray>
     fun connect(config: SessionConfig)
     fun sendAudio(frame: ByteArray): Boolean
     fun stop()
@@ -49,11 +51,18 @@ class GeminiSessionClient : SessionClient {
     private val scheduler = ScheduledThreadPoolExecutor(1) { runnable ->
         Thread(runnable, "gemini-setup-timeout").apply { isDaemon = true }
     }.apply { removeOnCancelPolicy = true }
-    private val mutableEvents = MutableSharedFlow<ClientEvent>(
-        extraBufferCapacity = 32,
+    private val eventChannel = Channel<ClientEvent>(
+        capacity = 32,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = ::discardEvent,
     )
-    override val events: SharedFlow<ClientEvent> = mutableEvents
+    override val events: Flow<ClientEvent> = eventChannel.receiveAsFlow()
+    private val audioChannel = Channel<ByteArray>(
+        capacity = 12,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = { it.fill(0) },
+    )
+    override val audio: Flow<ByteArray> = audioChannel.receiveAsFlow()
 
     override fun connect(config: SessionConfig) {
         check(connectionState.compareAndSet(ConnectionState.IDLE, ConnectionState.CONNECTING)) { "session already active" }
@@ -105,6 +114,18 @@ class GeminiSessionClient : SessionClient {
         if (!active.close(1000, "client stop")) active.cancel()
     }
 
+    private fun emit(event: ClientEvent) {
+        if (event is ClientEvent.Audio) {
+            if (!audioChannel.trySend(event.pcm).isSuccess) event.pcm.fill(0)
+        } else if (!eventChannel.trySend(event).isSuccess) {
+            discardEvent(event)
+        }
+    }
+
+    private fun discardEvent(event: ClientEvent) {
+        if (event is ClientEvent.Audio) event.pcm.fill(0)
+    }
+
     private inner class Listener(private val setupMessage: String) : WebSocketListener() {
         private val timeout = AtomicReference<ScheduledFuture<*>?>(null)
 
@@ -133,10 +154,10 @@ class GeminiSessionClient : SessionClient {
                 if (event == ClientEvent.Connected) {
                     if (connectionState.compareAndSet(ConnectionState.AWAITING_SETUP, ConnectionState.READY)) {
                         cancelTimeout()
-                        mutableEvents.tryEmit(event)
+                        emit(event)
                     }
                 } else if (connectionState.get() == ConnectionState.READY || event is ClientEvent.Failed) {
-                    mutableEvents.tryEmit(event)
+                    emit(event)
                 }
             }
         }
@@ -164,14 +185,14 @@ class GeminiSessionClient : SessionClient {
                 t is javax.net.ssl.SSLException -> "TLS 证书验证失败"
                 else -> "Gemini 网络连接失败"
             }
-            mutableEvents.tryEmit(ClientEvent.Failed(message))
+            emit(ClientEvent.Failed(message))
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             cancelTimeout()
             if (!socket.compareAndSet(webSocket, null)) return
             connectionState.set(ConnectionState.IDLE)
-            mutableEvents.tryEmit(ClientEvent.Closed)
+            emit(ClientEvent.Closed)
         }
 
         private fun fail(webSocket: WebSocket, message: String) {
@@ -179,7 +200,7 @@ class GeminiSessionClient : SessionClient {
             if (!socket.compareAndSet(webSocket, null)) return
             connectionState.set(ConnectionState.IDLE)
             webSocket.cancel()
-            mutableEvents.tryEmit(ClientEvent.Failed(message))
+            emit(ClientEvent.Failed(message))
         }
     }
 
