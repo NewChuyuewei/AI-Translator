@@ -270,15 +270,18 @@ private fun SelectionCard(
     badge: String,
     onClick: () -> Unit,
 ) {
-    ElevatedCard(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled, onClick = onClick),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        ),
+        color = when {
+            !enabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            selected -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainer
+        },
+        shape = RoundedCornerShape(14.dp),
         border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+        tonalElevation = 2.dp,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),

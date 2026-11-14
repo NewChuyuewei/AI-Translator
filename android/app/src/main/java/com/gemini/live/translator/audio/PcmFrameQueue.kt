@@ -4,7 +4,8 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 
 /** Forty milliseconds of 16 kHz mono PCM16. */
-const val PCM_FRAME_BYTES: Int = 16_000 * 40 / 1_000 * 2
+const val PCM_SAMPLE_RATE: Int = 16_000
+const val PCM_FRAME_BYTES: Int = PCM_SAMPLE_RATE * 40 / 1_000 * 2
 const val MAX_QUEUED_AUDIO_MS: Int = 240
 
 class SilenceGate(

@@ -38,8 +38,8 @@ class AndroidAudioRouter {
             projection.set(mediaProjection)
         }
         val route: (CaptureSource, ByteArray) -> Unit = if (mode == AudioSourceMode.MIXED) {
-            startMixer(scope, onFrame)
-            { source, bytes ->
+            startMixer(scope, onFrame);
+            { source: CaptureSource, bytes: ByteArray ->
                 if (!mixedFrames.trySend(CapturedFrame(source, bytes)).isSuccess) bytes.fill(0)
             }
         } else {

@@ -30,7 +30,7 @@ class SystemAudioCapture {
     ) {
         check(worker.get() == null) { "system capture already active" }
         val minimum = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE,
+            PCM_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
@@ -51,7 +51,7 @@ class SystemAudioCapture {
             .build()
         val format = AudioFormat.Builder()
             .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(SAMPLE_RATE)
+            .setSampleRate(PCM_SAMPLE_RATE)
             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
             .build()
         val record = runCatching {
