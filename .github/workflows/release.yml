@@ -162,7 +162,18 @@ jobs:
       - name: Configure generated Android project
         run: node scripts/configure-android-gradle.mjs
       - name: Build ARM64 debug APK
-        run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npx tauri android build --debug --apk --target aarch64 --ci
+        run: |
+          if NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npx tauri android build --debug --apk --target aarch64 --ci >android-build.log 2>&1; then
+            cat android-build.log
+          else
+            tail -n 160 android-build.log
+            details="$(tail -c 12000 android-build.log)"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            echo "::error title=Android build failed::${details}"
+            exit 1
+          fi
       - name: Stage APK
         run: |
           mkdir -p release-assets
