@@ -88,6 +88,7 @@ jobs:
           $readme = Get-Content "packaging/windows-portable-readme.txt" -Raw
           $readme = $readme -replace '(?m)^Gemini Live Translator [^ ]+', "Gemini Live Translator $version"
           Set-Content (Join-Path $portableDir "README.txt") -Value $readme -Encoding utf8
+          Copy-Item "COPYRIGHT" (Join-Path $portableDir "COPYRIGHT.txt")
 
           # MSVC normally links the WebView2 loader statically. Preserve a DLL
           # beside the executable if a future Tauri build emits one dynamically.
