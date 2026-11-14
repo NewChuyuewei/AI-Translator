@@ -1,0 +1,8 @@
+{
+  "version": "0.1.4",
+  "app": {
+    "windows": [
+      { "label": "main", "title": "Gemini Live Translator", "url": "control.html", "fullscreen": false }
+    ]
+  }
+}

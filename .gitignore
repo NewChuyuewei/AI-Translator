@@ -1,0 +1,12 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+plugins/mobile-audio/android/.tauri/
+plugins/mobile-audio/android/build/
+packaging/payload/
+Gemini-Live-Translator-Windows-Setup.exe
+.DS_Store
+*.keystore
+*.jks
+.env
