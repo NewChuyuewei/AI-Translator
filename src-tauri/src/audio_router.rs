@@ -325,7 +325,8 @@ pub fn list_devices() -> Result<AudioDevices> {
         for _ in 0..100 { assert!(disabled.should_send(&silence, false)); }
     }
     #[test] fn stereo_downmix_and_clipping() {
-        assert_eq!(downmix(&[1.0,-1.0,0.5,0.5],2), vec![0.0,0.5]);
+        let mut resampler = Resampler::new(SAMPLE_RATE, SAMPLE_RATE);
+        assert_eq!(resampler.push_interleaved(&[1.0,-1.0,0.5,0.5,0.0,0.0], 2), vec![0.0,0.5]);
         let bytes = pcm16([10.0,-10.0,0.0]);
         assert_eq!(i16::from_le_bytes([bytes[0],bytes[1]]), 32767);
         assert_eq!(i16::from_le_bytes([bytes[2],bytes[3]]), -32767);

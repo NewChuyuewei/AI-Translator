@@ -248,7 +248,7 @@ pub enum ServerFrame {
     Control(&'static str),
 }
 pub fn decode_server_frame(message: Message) -> Result<ServerFrame> {
-    let (kind, value) = match message {
+    let (kind, value): (&'static str, Value) = match message {
         Message::Text(text) => {
             if text.len() > MAX_SERVER_MESSAGE_BYTES { return Err(anyhow!("Gemini 文本帧超过大小限制")); }
             ("文本", serde_json::from_str(&text).map_err(|e|
