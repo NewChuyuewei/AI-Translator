@@ -33,7 +33,9 @@ jobs:
             label: Windows x64
             bundles: nsis
             artifact: windows-x64
-          - os: macos-14
+          # macOS 14 runners retired on 2026-11-02. The standard macos-15
+          # image is the supported Apple Silicon runner.
+          - os: macos-15
             label: macOS Apple Silicon
             bundles: dmg
             artifact: macos-arm64
@@ -43,10 +45,10 @@ jobs:
             artifact: linux-x64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -70,7 +72,7 @@ jobs:
           find src-tauri/target/release/bundle -type f \
             \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) \
             -exec cp '{}' release-assets/ \;
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: release-assets/*
@@ -81,16 +83,21 @@ jobs:
     name: Android ARM64 debug APK
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
+        with:
+          # Install command-line tools and accept licenses here; the exact SDK,
+          # build-tools and NDK packages are installed in the explicit step below.
+          # This also avoids the removed legacy Android SDK `tools` package.
+          packages: ''
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
@@ -112,7 +119,7 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk \
             "release-assets/Gemini-Live-Translator-${VERSION}-arm64-debug.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-arm64-debug
           path: release-assets/*.apk
@@ -130,12 +137,12 @@ jobs:
       PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify tag matches package version
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Tag ${RELEASE_TAG} does not match v${VERSION}"; exit 1; }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
