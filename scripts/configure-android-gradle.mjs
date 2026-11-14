@@ -54,12 +54,22 @@ const androidRoot = path.dirname(path.resolve(propertiesPath));
 const rootBuild = path.join(androidRoot, 'build.gradle.kts');
 if (fs.existsSync(rootBuild)) {
   const buildScript = fs.readFileSync(rootBuild, 'utf8');
-  const modern = buildScript
+  let modern = buildScript
     .replace(/com\.android\.tools\.build:gradle:[^"]+/, `com.android.tools.build:gradle:${AGP_VERSION}`)
     .replace(
       /org\.jetbrains\.kotlin:kotlin-gradle-plugin:[^"]+/,
       `org.jetbrains.kotlin:kotlin-gradle-plugin:${KOTLIN_VERSION}`,
     );
+  if (!modern.includes(`kotlin-gradle-plugin-api:${KOTLIN_VERSION}`)) {
+    modern = modern.replace(
+      /buildscript\s*\{/,
+      `buildscript {${newline}    configurations.configureEach {${newline}` +
+        `        resolutionStrategy.force(${newline}` +
+        `            "org.jetbrains.kotlin:kotlin-gradle-plugin:${KOTLIN_VERSION}",${newline}` +
+        `            "org.jetbrains.kotlin:kotlin-gradle-plugin-api:${KOTLIN_VERSION}",${newline}` +
+        `        )${newline}    }`,
+    );
+  }
   if (!modern.includes(`com.android.tools.build:gradle:${AGP_VERSION}`)) {
     throw new Error(`Could not update the generated Android Gradle plugin in ${rootBuild}`);
   }

@@ -80,6 +80,7 @@ try {
   const rootScript = fs.readFileSync(rootBuild, 'utf8');
   assert.match(rootScript, /com\.android\.tools\.build:gradle:9\.4\.1/);
   assert.match(rootScript, /kotlin-gradle-plugin:2\.4\.21/);
+  assert.match(rootScript, /kotlin-gradle-plugin-api:2\.4\.21/);
   assert.match(fs.readFileSync(wrapperProperties, 'utf8'), /gradle-9\.9\.1-bin\.zip/);
   const appScript = fs.readFileSync(appBuild, 'utf8');
   assert.doesNotMatch(appScript, /^android\s*\{/m);
