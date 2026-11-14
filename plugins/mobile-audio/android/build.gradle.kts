@@ -25,7 +25,7 @@ extensions.configure<LibraryExtension> {
 // so linking the Kotlin 2.4-only JVM_25 enum field fails at runtime. The string
 // compatibility API still passes target 25 to the Kotlin 2.4 compiler.
 tasks.withType<KotlinCompile>().configureEach {
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION", "DEPRECATION_ERROR")
     kotlinOptions.jvmTarget = "25"
 }
 

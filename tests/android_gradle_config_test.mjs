@@ -79,7 +79,7 @@ try {
   assert.match(appScript, /^extensions\.configure<com\.android\.build\.api\.dsl\.ApplicationExtension>\s*\{/m);
   assert.doesNotMatch(appScript, /JavaVersion\.VERSION_(?:1_8|17)|JvmTarget\.JVM_(?:1_8|17|25)/);
   assert.equal((appScript.match(/JavaVersion\.VERSION_25/g) || []).length, 2);
-  assert.match(appScript, /@Suppress\("DEPRECATION"\)[\r\n]+\s*kotlinOptions\.jvmTarget = "25"/);
+  assert.match(appScript, /@Suppress\("DEPRECATION", "DEPRECATION_ERROR"\)[\r\n]+\s*kotlinOptions\.jvmTarget = "25"/);
   assert.match(fs.readFileSync(rustWebView, 'utf8'), /^@file:Suppress\("DEPRECATION"\)\r?\n\r?\npackage /);
   assert.match(fs.readFileSync(wryActivity, 'utf8'), /^@file:Suppress\("DEPRECATION"\)\r?\n\r?\npackage /);
 

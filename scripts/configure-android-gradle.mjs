@@ -81,7 +81,7 @@ if (fs.existsSync(appBuild)) {
     modern += `${newline}${newline}// AGP 9.3.1 exposes its embedded Kotlin 2.2 JvmTarget class to build scripts.${newline}` +
       `// Avoid linking the Kotlin 2.4-only JVM_25 field while still passing target 25.${newline}` +
       `tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {${newline}` +
-      `    @Suppress("DEPRECATION")${newline}` +
+      `    @Suppress("DEPRECATION", "DEPRECATION_ERROR")${newline}` +
       `    kotlinOptions.jvmTarget = "25"${newline}` +
       `}${newline}`;
   }
