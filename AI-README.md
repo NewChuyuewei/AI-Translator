@@ -4,7 +4,7 @@
 
 ## 1. 当前目标与不可变更的产品约定
 
-- Tauri 2 + Rust 实时语音翻译 / 转写原型；目标平台 Windows、macOS、Android，Linux 用于开发测试。
+- 桌面端使用 Tauri 2 + Rust；Android 已改为独立的 Kotlin + JDK 25 + Jetpack Compose 工程，不复用 WebView、Rust 或 JNI。Linux 用于开发测试。
 - 保留现有 `Gemini 3.8 Live` 指令式翻译、`Gemini 3.8 Live Extended Thinking`（LOW/MEDIUM/HIGH）及原有系统代理、音源、字幕窗、Android 服务和连接诊断。
 - 增加 `gemini-3.5-live-translate-preview`：每个会话固定**一个目标语言**，原文及译文字幕，可选择播放译音；不是双向翻译。当前 `echoTargetLanguage=false`：输入已是目标语言时不会复述。
 - 增加 `gemini-3.5-transcribe-live`：用户明确选择**只实时转写原文，不做翻译，也不播放译音**；不得私自串接收费的二次翻译服务。目标语言、双向和译音控制在该模式不可用。默认 VERBATIM；可选 SMART，它只整理原文，可能删除口头语或修改格式。
@@ -86,7 +86,7 @@ Windows GNU 交叉构建及 NSIS 命令见 `README.md`；GNU 免安装版的 `We
 
 ## 6. 当前验证边界与下一步
 
-- 1.0.0 当前源码的本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入并在 GitHub runner 试跑，已根据 Android SDK、macOS runner／SDK 错误继续修正，但完整发布仍待再次验证；发布工作流会生成 Windows NSIS 与便携 ZIP、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的 Android ARM64 APK。尚未生成或验证 1.0.0 安装包。
+- 1.0.0 当前源码的本地设置／加密保险库及 UI 改动已通过 `npm run build` 和 JSDOM UI／字幕窗测试，并增加普通设置清空敏感字段、加密往返、错误密码拒绝的 Rust 单元测试；当前 Arena 环境没有 `cargo`，因此尚未实际运行更新后的 Rust 测试。`.github/workflows/ci.yml` 和 `release.yml` 已加入并在 GitHub runner 试跑，已根据 Android SDK、macOS runner／SDK 错误继续修正，但完整发布仍待再次验证；发布工作流会生成 Windows NSIS 与便携 ZIP、macOS DMG、Linux DEB/AppImage 和明确标为 debug 的原生 Kotlin Android APK。尚未生成或验证 1.0.0 安装包。
 - 0.1.4 前端 `npm run build`、JSDOM 控制台 / 字幕窗模拟测试通过；Linux Rust 单元和本地模拟 WebSocket 测试 **30/30** 通过。Android ARM64 debug APK 已构建，静态确认 0.1.4 / versionCode 1004、16 KB ZIP/ELF 对齐及与 0.1.3 相同的调试签名；这些检查不能证明能在手机上启动。Windows x64 GNU release 已交叉编译，NSIS 安装包与便携 ZIP 已构建并静态检查，**未在 Windows 真机运行**。
 - 本次交付文件名：`Gemini-Live-Translator-0.1.4-arm64-debug.apk`、`Gemini-Live-Translator-0.1.4-Windows-Setup.exe`、`Gemini-Live-Translator-0.1.4-Windows-portable.zip`、`Gemini-Live-Translator-0.1.4-source.zip`。源码包内含本文件，但不包含其他安装包或签名密钥；新会话需要继续开发时请提供源码包。
 - 没有真实 Gemini API Key，也没有可用真机，**尚未验证** 3.5 模型的真实 setup 接受情况、各语种 interim/final 事件、译音、代理、音频捕获及目标平台 UI。账号、地区和配额可能限制模型。

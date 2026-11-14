@@ -124,7 +124,7 @@ jobs:
           retention-days: 14
 
   android:
-    name: Android ARM64 debug APK
+    name: Native Android Kotlin debug APK
     runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
@@ -140,38 +140,39 @@ jobs:
           java-version: 25
       - uses: android-actions/setup-android@v4
         with:
-          # Install command-line tools and accept licenses here; the exact SDK,
-          # build-tools and NDK packages are installed in the explicit step below.
-          # This also avoids the removed legacy Android SDK `tools` package.
           packages: ''
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: gradle/actions/setup-gradle@v5
         with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+          gradle-version: 9.9.1
       - name: Apply custom release version
         run: |
           test "${RELEASE_TAG}" = "v${RELEASE_TAG#v}" || { echo "Release tag must start with v"; exit 1; }
           node scripts/set-version.mjs "${RELEASE_TAG#v}"
-      - name: Install Android SDK and NDK
-        run: sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;36.0.0" "build-tools;37.0.0" "ndk;28.2.13676358"
-      - run: npm ci
-      - name: Initialize generated Android project
-        run: npx tauri android init --ci
-      - name: Configure generated Android project
-        run: node scripts/configure-android-gradle.mjs
-      - name: Build ARM64 debug APK
-        run: NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npx tauri android build --debug --apk --target aarch64 --ci
+      - name: Install Android SDK
+        run: sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+      - name: Test and build native Android APK
+        run: gradle -p android --no-daemon testDebugUnitTest assembleDebug
+      - name: Verify Java 25 Kotlin bytecode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for filename in ("MainActivity.class", "SessionConfig.class"):
+              matches = list(Path("android/app/build").rglob(filename))
+              if not matches:
+                  raise SystemExit(f"Missing compiled class: {filename}")
+              versions = {int.from_bytes(path.read_bytes()[6:8], "big") for path in matches}
+              if versions != {69}:
+                  raise SystemExit(f"{filename}: expected Java 25 class version 69, got {sorted(versions)}")
+          PY
       - name: Stage APK
         run: |
           mkdir -p release-assets
           VERSION="${RELEASE_TAG#v}"
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk \
-            "release-assets/Gemini-Live-Translator-${VERSION}-arm64-debug.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+            "release-assets/Gemini-Live-Translator-${VERSION}-native-android-debug.apk"
       - uses: actions/upload-artifact@v7
         with:
-          name: android-arm64-debug
+          name: android-native-debug
           path: release-assets/*.apk
           if-no-files-found: error
           retention-days: 14
