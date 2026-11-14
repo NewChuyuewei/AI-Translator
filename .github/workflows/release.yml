@@ -167,7 +167,7 @@ jobs:
             cat android-build.log
           else
             tail -n 160 android-build.log
-            details="$(tail -c 12000 android-build.log)"
+            details="$(grep -E -i -B 4 -A 12 'FAILURE:|What went wrong:|^e: |error:|exception|could not|JVM_25|unsupported class|failed' android-build.log | tail -c 12000)"
             details="${details//'%'/'%25'}"
             details="${details//$'\r'/'%0D'}"
             details="${details//$'\n'/'%0A'}"
