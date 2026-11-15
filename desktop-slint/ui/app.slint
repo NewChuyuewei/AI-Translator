@@ -28,7 +28,7 @@ export component CaptionWindow inherits Window {
 export component ControlWindow inherits Window {
     title: "Gemini Live Translator · Slint 迁移预览";
     width: 620px;
-    height: 900px;
+    height: 980px;
     background: #f5f7f8;
 
     in-out property <string> api-key: "";
@@ -59,6 +59,9 @@ export component ControlWindow inherits Window {
     in-out property <bool> session-running: false;
     in-out property <bool> probe-running: false;
     in-out property <string> status-message: "Slint 桌面迁移预览 · 尚未连接会话后端";
+    in-out property <[string]> diagnostic-model: ["尚无诊断记录"];
+    in-out property <int> diagnostic-index: 0;
+    in-out property <int> diagnostic-count: 0;
 
     callback start-stop();
     callback probe-transport();
@@ -68,6 +71,8 @@ export component ControlWindow inherits Window {
     callback refresh-devices();
     callback toggle-overlay-lock();
     callback overlay-scale-changed(float);
+    callback copy-diagnostics();
+    callback clear-diagnostics();
     callback quit-requested();
 
     VerticalBox {
@@ -152,6 +157,15 @@ export component ControlWindow inherits Window {
             Button { text: root.overlay-locked ? "解锁字幕窗" : "锁定字幕窗"; clicked => { root.toggle-overlay-lock(); } }
             Text { text: "缩放 " + round(root.overlay-scale * 100) + "%"; vertical-alignment: center; color: #44545b; }
             Slider { minimum: 0.8; maximum: 1.6; value <=> root.overlay-scale; changed(value) => { root.overlay-scale-changed(value); } }
+        }
+
+        Rectangle { height: 1px; background: #d7dfe2; }
+        Text { text: "04 安全诊断（" + root.diagnostic-count + "/300）"; color: #14242c; font-size: 17px; font-weight: 700; }
+        HorizontalBox {
+            spacing: 8px;
+            ComboBox { current-index <=> root.diagnostic-index; model: root.diagnostic-model; }
+            Button { enabled: root.diagnostic-count > 0; text: "复制全部"; clicked => { root.copy-diagnostics(); } }
+            Button { enabled: root.diagnostic-count > 0; text: "清空"; clicked => { root.clear-diagnostics(); } }
         }
 
         Rectangle { height: 1px; background: #d7dfe2; }

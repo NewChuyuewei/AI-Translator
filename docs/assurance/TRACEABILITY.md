@@ -29,6 +29,8 @@
 | SWR-DIAG-002 | `diagnostics::Redactor::new`、`Drop` | `swr_diag_002_redactor_masks_encoded_and_decoded_credentials`、旧 WebSocket 日志测试 |
 | SWR-DIAG-003 | `sanitize_message`、`redact_secret` | `swr_diag_003_messages_are_bounded_and_short_tokens_do_not_garble_words` |
 | SWR-DIAG-004 | `LogLevel`、`LogEntry`、Tauri `Trace` 适配器 | `swr_diag_004_level_serialization_remains_frontend_compatible`、UI mock 测试 |
+| SWR-NDIAG-001 | Slint `NativeDiagnostics::begin_boundary`/`record`、`diagnostic-model` | `swr_ndiag_001_boundary_redacts_ui_lines_and_copy_text`、UI 绑定代码评审 |
+| SWR-NDIAG-002 | `NativeDiagnostics::copy_text` 64 Ki 字符上限、核心 `clear` 水位线 | `swr_ndiag_002_copy_is_bounded_and_clear_uses_core_watermark` |
 | SWR-SET-001 | `settings_for_storage`、`encode_settings` | `swr_set_001_encode_never_contains_sensitive_values`、旧 Tauri 设置测试 |
 | SWR-SET-002 | `PersistedSettings`、`decode_settings` | `swr_set_002_current_format_round_trips_with_compatible_fields`、前端 mock 测试 |
 | SWR-SET-003 | `DecodedSettings::migration_required`、Tauri 原子写适配器 | `swr_set_003_legacy_migration_is_explicit_and_erases_secrets`、代码评审 |
