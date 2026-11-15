@@ -15,7 +15,7 @@ mod native_transport;
 use anyhow::anyhow;
 use caption_platform::MousePassthrough;
 use config_store::ConfigStore;
-use desktop_lifecycle::{InstanceError, InstanceGuard};
+use desktop_lifecycle::{GlobalHotkey, InstanceError, InstanceGuard};
 use device_provider::NativeDeviceProvider;
 use native_diagnostics::NativeDiagnostics;
 use native_session::NativeSessionPort;
@@ -315,6 +315,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let session = Rc::new(RefCell::new(NativeSessionPort::default()));
     let caption_input = Rc::new(RefCell::new(MousePassthrough::default()));
     let diagnostics = Rc::new(RefCell::new(NativeDiagnostics::default()));
+    let global_hotkey = match GlobalHotkey::register_f8() {
+        Ok(hotkey) => Some(hotkey),
+        Err(error) => {
+            control.set_status_message(format!("全局 F8 未启用：{error}").into());
+            None
+        }
+    };
     diagnostics
         .borrow()
         .record(LogLevel::Info, "Slint 原生桌面已启动");
@@ -637,6 +644,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let control_weak = control.as_weak();
     tray.on_toggle_session(move || {
         if let Some(ui) = control_weak.upgrade() {
+            ui.invoke_start_stop();
+        }
+    });
+
+    let hotkey_control = control.as_weak();
+    let hotkey_timer = Timer::default();
+    hotkey_timer.start(TimerMode::Repeated, Duration::from_millis(25), move || {
+        if global_hotkey
+            .as_ref()
+            .is_some_and(GlobalHotkey::take_pressed)
+            && let Some(ui) = hotkey_control.upgrade()
+        {
             ui.invoke_start_stop();
         }
     });

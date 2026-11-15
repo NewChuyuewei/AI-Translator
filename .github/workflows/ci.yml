@@ -64,6 +64,11 @@ jobs:
           details="${details//$'\n'/'%0A'}"
           echo "::error title=Rust Clippy failed::${details}"
           exit 1
+      - name: Cross-check native window and lifecycle adapters
+        run: |
+          rustup target add x86_64-pc-windows-gnu x86_64-apple-darwin
+          cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-pc-windows-gnu
+          cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-apple-darwin
       - name: Test Rust workspace and compile Slint desktop
         run: |
           if cargo test --workspace --all-targets --locked >workspace-test.log 2>&1; then
