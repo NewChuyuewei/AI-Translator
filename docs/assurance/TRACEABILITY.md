@@ -13,6 +13,13 @@
 | SWR-PROTO-002 | `protocol::setup` 的模型专属分支 | `swr_proto_002_translation_and_transcription_semantics_are_distinct`、旧精确 setup 回归测试 |
 | SWR-PROTO-003 | `protocol::audio_frame`、`MAX_AUDIO_BYTES_PER_MESSAGE` | `swr_proto_003_audio_frames_are_bounded_and_exactly_encoded` |
 | SWR-PROTO-004 | `protocol::stream_end` | `swr_proto_004_stream_end_has_no_implicit_audio_payload` |
+| SWR-RX-001 | `server_protocol::decode_data_frame`、`DataFrameKind` | `swr_rx_001_text_and_binary_decoding_is_bounded_and_content_safe`、旧 malformed-frame 测试 |
+| SWR-RX-002 | `server_protocol::ParsedMessage`、`parse_server_value` | `swr_rx_002_parses_naming_styles_and_typed_state`、旧转写/WebSocket 测试 |
+| SWR-RX-003 | `MAX_TRANSCRIPT_BYTES`、`MAX_AUDIO_BYTES_PER_MESSAGE` | `swr_rx_003_audio_and_transcripts_are_bounded_before_growth`、旧 oversized-message 测试 |
+| SWR-RX-004 | `safe_error_hint`、`server_error`、`close_description` | `swr_rx_004_server_errors_are_allowlisted_and_redacted`、旧服务端错误脱敏测试 |
+| SWR-SESSION-001 | `session_driver::SessionDriver`、`DriverEvent` | `swr_session_001_memory_session_runs_without_ui_or_socket` |
+| SWR-SESSION-002 | `SessionDriver::receive`、`encode_audio` | `swr_session_002_rejects_out_of_order_and_duplicate_events` |
+| SWR-SESSION-003 | `SessionDriver::close`、`DriverState::Closed` | `swr_session_003_close_is_deterministic_and_idempotence_is_rejected` |
 
 ## 开放验证项
 

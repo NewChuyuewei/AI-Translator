@@ -1,9 +1,10 @@
 //! Gemini Live raw WebSocket protocol. API key is sent in a request header,
 //! never embedded in the URL or logged.
 use anyhow::{anyhow, Context, Result};
+#[cfg(test)]
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{collections::HashSet, time::{Duration, Instant}};
 use tokio::{net::TcpStream, sync::watch};
@@ -12,9 +13,9 @@ use crate::{diagnostics::Trace, proxy::{self, Route}};
 pub use translator_core::{ModelKind, ThinkingLevel, TranscriptionMode};
 
 const ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
-const MAX_SERVER_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
-const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024;
-const MAX_AUDIO_BYTES_PER_MESSAGE: usize = 1024 * 1024;
+use translator_core::server_protocol::MAX_SERVER_MESSAGE_BYTES;
+#[cfg(test)]
+use translator_core::server_protocol::{MAX_AUDIO_BYTES_PER_MESSAGE, MAX_TRANSCRIPT_BYTES};
 pub type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[derive(Clone, Deserialize)]
@@ -151,7 +152,7 @@ async fn connect_with_trace(endpoint: &str, options: &GeminiOptions, route: &Rou
                 ServerFrame::Data { kind, value } => {
                     let category = classify_message(&value);
                     if seen.insert((kind, category)) { trace.info(format!("初始化收到 {kind} 帧，类型 {category}")); }
-                    if let Some(error) = value.get("error") { return Err(server_error(error, "Gemini setup 被拒绝")); }
+                    if let Some(error) = value.get("error") { return Err(server_error(error, ServerErrorContext::Setup)); }
                     if field(&value, "setupComplete", "setup_complete").is_some() { return Ok(()); }
                 }
                 ServerFrame::Close { code, hint } => return Err(anyhow!(close_description(code, hint))),
@@ -177,169 +178,48 @@ pub async fn cancelled(cancel: &mut watch::Receiver<bool>) {
     while cancel.changed().await.is_ok() { if *cancel.borrow() { break; } }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InteractionStatus { InProgress, Idle }
-#[derive(Default, Debug)]
-pub struct ParsedMessage {
-    pub input: Option<(String, bool)>, pub interim_input: Option<(String, bool)>,
-    pub output: Option<(String, bool)>,
-    pub audio: Vec<Vec<u8>>, pub interrupted: bool, pub turn_complete: bool, pub go_away: bool,
-    pub interaction_status: Option<InteractionStatus>,
-}
-fn field<'a>(v: &'a Value, a: &str, b: &str) -> Option<&'a Value> { v.get(a).or_else(|| v.get(b)) }
+pub use translator_core::server_protocol::{
+    InteractionStatus, ParsedMessage, ServerErrorContext, classify_message, close_description,
+    parse_server_value, safe_error_hint, server_error,
+};
+use translator_core::server_protocol::{DataFrameKind, decode_data_frame};
 
-/// One decoder for setup and the live session: text or binary UTF-8 JSON.
-/// Neither parse errors nor diagnostics include the untrusted frame contents.
+fn field<'a>(value: &'a Value, camel: &str, snake: &str) -> Option<&'a Value> {
+    value.get(camel).or_else(|| value.get(snake))
+}
+
+/// WebSocket control frames stay in the transport adapter; text and binary
+/// data payload validation is delegated to the pure core parser.
 pub enum ServerFrame {
     Data { kind: &'static str, value: Value },
     Close { code: Option<u16>, hint: Option<&'static str> },
     Control(&'static str),
 }
 pub fn decode_server_frame(message: Message) -> Result<ServerFrame> {
-    let (kind, value): (&'static str, Value) = match message {
+    let (kind, value) = match message {
         Message::Text(text) => {
-            if text.len() > MAX_SERVER_MESSAGE_BYTES { return Err(anyhow!("Gemini 文本帧超过大小限制")); }
-            ("文本", serde_json::from_str(&text).map_err(|e|
-                anyhow!("Gemini 文本帧不是有效 JSON（行 {}，列 {}）", e.line(), e.column()))?)
+            let kind = DataFrameKind::Text;
+            (kind.diagnostic_label(), decode_data_frame(kind, text.as_bytes())?)
         }
         Message::Binary(bytes) => {
-            if bytes.len() > MAX_SERVER_MESSAGE_BYTES { return Err(anyhow!("Gemini 二进制帧超过大小限制")); }
-            std::str::from_utf8(&bytes).map_err(|_| anyhow!("Gemini 二进制帧不是有效 UTF-8"))?;
-            ("二进制", serde_json::from_slice(&bytes).map_err(|e|
-                anyhow!("Gemini 二进制帧不是有效 JSON（行 {}，列 {}）", e.line(), e.column()))?)
+            let kind = DataFrameKind::Binary;
+            (kind.diagnostic_label(), decode_data_frame(kind, &bytes)?)
         }
         Message::Close(frame) => return Ok(ServerFrame::Close {
-            code: frame.as_ref().map(|f| u16::from(f.code)),
-            hint: frame.as_ref().and_then(|f| safe_error_hint(&f.reason)),
+            code: frame.as_ref().map(|value| u16::from(value.code)),
+            hint: frame.as_ref().and_then(|value| safe_error_hint(&value.reason)),
         }),
         Message::Ping(_) => return Ok(ServerFrame::Control("Ping")),
         Message::Pong(_) => return Ok(ServerFrame::Control("Pong")),
         Message::Frame(_) => return Ok(ServerFrame::Control("其他控制帧")),
     };
-    if !value.is_object() { return Err(anyhow!("Gemini {kind} 帧的 JSON 顶层不是对象")); }
     Ok(ServerFrame::Data { kind, value })
 }
 
-/// Only ever return fixed labels, never arbitrary JSON keys or values.
-pub fn classify_message(value: &Value) -> &'static str {
-    if value.get("error").is_some() { "error" }
-    else if field(value, "setupComplete", "setup_complete").is_some() { "setupComplete" }
-    else if field(value, "serverContent", "server_content").is_some() { "serverContent" }
-    else if field(value, "goAway", "go_away").is_some() { "goAway" }
-    else if field(value, "usageMetadata", "usage_metadata").is_some() { "usageMetadata" }
-    else if field(value, "sessionResumptionUpdate", "session_resumption_update").is_some() { "sessionResumptionUpdate" }
-    else if field(value, "interactionStatus", "interaction_status").is_some() { "interactionStatus" }
-    else if field(value, "toolCall", "tool_call").is_some() { "toolCall" }
-    else if field(value, "toolCallCancellation", "tool_call_cancellation").is_some() { "toolCallCancellation" }
-    // Gemini may add forward-compatible metadata envelopes. They are valid
-    // JSON but carry no audio/transcription state this client needs.
-    else { "协议元数据（已安全忽略）" }
-}
-
-// Map untrusted server text to a fixed, generic hint; do not expose its reason,
-// which might echo credentials or transcripts. Code and status are allowlisted.
-fn safe_error_hint(raw: &str) -> Option<&'static str> {
-    let s = raw.chars().take(512).collect::<String>().to_ascii_lowercase();
-    if s.contains("api key") || s.contains("api_key") || s.contains("unauthenticated") || s.contains("permission_denied") || s.contains("permission denied") {
-        Some("请检查 API Key 和账户权限")
-    } else if s.contains("quota") || s.contains("resource_exhausted") || s.contains("rate limit") {
-        Some("请检查配额和调用频率")
-    } else if s.contains("not found") || s.contains("not_found") || s.contains("not supported") || s.contains("not available") || s.contains("unsupported model") {
-        Some("请检查模型 ID、API 版本及账户可用性")
-    } else if s.contains("region") || s.contains("location") || s.contains("country") {
-        Some("请检查 Gemini 服务的地区可用性")
-    } else if s.contains("invalid argument") || s.contains("invalid_argument") {
-        Some("setup 参数可能不受支持")
-    } else { None }
-}
-fn status_label(raw: &str) -> Option<&'static str> {
-    match raw {
-        "CANCELLED" => Some("CANCELLED"), "UNKNOWN" => Some("UNKNOWN"), "INVALID_ARGUMENT" => Some("INVALID_ARGUMENT"),
-        "DEADLINE_EXCEEDED" => Some("DEADLINE_EXCEEDED"), "NOT_FOUND" => Some("NOT_FOUND"),
-        "ALREADY_EXISTS" => Some("ALREADY_EXISTS"), "PERMISSION_DENIED" => Some("PERMISSION_DENIED"),
-        "RESOURCE_EXHAUSTED" => Some("RESOURCE_EXHAUSTED"), "FAILED_PRECONDITION" => Some("FAILED_PRECONDITION"),
-        "ABORTED" => Some("ABORTED"), "OUT_OF_RANGE" => Some("OUT_OF_RANGE"), "UNIMPLEMENTED" => Some("UNIMPLEMENTED"),
-        "INTERNAL" => Some("INTERNAL"), "UNAVAILABLE" => Some("UNAVAILABLE"), "DATA_LOSS" => Some("DATA_LOSS"),
-        "UNAUTHENTICATED" => Some("UNAUTHENTICATED"), _ => None,
-    }
-}
-pub fn close_description(code: Option<u16>, hint: Option<&'static str>) -> String {
-    let code = code.map(|c| c.to_string()).unwrap_or_else(|| "未提供".into());
-    let suffix = hint.map(|h| format!("；{h}")).unwrap_or_default();
-    format!("Gemini 关闭 WebSocket（关闭码 {code}）{suffix}；原始关闭原因未记录")
-}
-fn server_error(error: &Value, prefix: &str) -> anyhow::Error {
-    let code = error.get("code").and_then(Value::as_u64).filter(|c| (100..=599).contains(c));
-    let status = error.get("status").and_then(Value::as_str).and_then(status_label);
-    let hint = error.get("message").and_then(Value::as_str).and_then(safe_error_hint)
-        .or_else(|| status.and_then(safe_error_hint));
-    let mut details = Vec::new();
-    if let Some(code) = code { details.push(format!("代码 {code}")); }
-    if let Some(status) = status { details.push(format!("状态 {status}")); }
-    if let Some(hint) = hint { details.push(hint.into()); }
-    if details.is_empty() { details.push("未提供可安全显示的错误代码".into()); }
-    anyhow!("{prefix}（{}）；原始响应未记录", details.join("；"))
-}
-fn interaction_status(v: Option<&Value>) -> Option<InteractionStatus> {
-    match v?.as_str()? {
-        "IN_PROGRESS" => Some(InteractionStatus::InProgress),
-        "IDLE" => Some(InteractionStatus::Idle),
-        _ => None,
-    }
-}
-fn transcription(v: Option<&Value>) -> Result<Option<(String, bool)>> {
-    let Some(v) = v else { return Ok(None); };
-    let Some(text) = v.get("text").and_then(Value::as_str) else { return Ok(None); };
-    if text.len() > MAX_TRANSCRIPT_BYTES {
-        return Err(anyhow!("Gemini 转写文本超过大小限制"));
-    }
-    let finished = v.get("finished").and_then(Value::as_bool).unwrap_or(false);
-    Ok(Some((text.to_owned(), finished)))
-}
 #[cfg(test)]
 pub fn parse_server_message(text: &str) -> Result<ParsedMessage> {
-    match decode_server_frame(Message::Text(text.to_owned().into()))? {
-        ServerFrame::Data { value, .. } => parse_server_value(&value),
-        _ => Err(anyhow!("Gemini 消息不是 JSON 数据帧")),
-    }
-}
-pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
-    if let Some(error) = root.get("error") { return Err(server_error(error, "Gemini 返回错误")); }
-    let mut p = ParsedMessage {
-        go_away: field(root, "goAway", "go_away").is_some(),
-        interaction_status: interaction_status(field(root, "interactionStatus", "interaction_status")),
-        ..Default::default()
-    };
-    if let Some(c) = field(root, "serverContent", "server_content") {
-        p.interaction_status = interaction_status(field(c, "interactionStatus", "interaction_status")).or(p.interaction_status);
-        p.input = transcription(field(c, "inputTranscription", "input_transcription"))?;
-        p.interim_input = transcription(field(c, "interimInputTranscription", "interim_input_transcription"))?;
-        p.output = transcription(field(c, "outputTranscription", "output_transcription"))?;
-        p.interrupted = c.get("interrupted").and_then(Value::as_bool).unwrap_or(false);
-        p.turn_complete = field(c,"turnComplete","turn_complete").and_then(Value::as_bool).unwrap_or(false);
-        if let Some(parts) = field(c,"modelTurn","model_turn").and_then(|v| v.get("parts")).and_then(Value::as_array) {
-            let mut audio_bytes = 0usize;
-            for part in parts {
-                if let Some(inline) = field(part,"inlineData","inline_data") {
-                    if let Some(encoded) = inline.get("data").and_then(Value::as_str) {
-                        let mime = field(inline,"mimeType","mime_type").and_then(Value::as_str).unwrap_or("audio/pcm;rate=24000");
-                        if mime.starts_with("audio/pcm") {
-                            if mime.contains("rate=") && !mime.contains("rate=24000") { return Err(anyhow!("不支持的 Gemini 输出采样率（需要 24000 Hz）")); }
-                            // Bound encoded input before allocating its decoded form.
-                            if encoded.len() > (MAX_AUDIO_BYTES_PER_MESSAGE / 3 + 1) * 4 {
-                                return Err(anyhow!("Gemini 音频消息超过大小限制"));
-                            }
-                            let decoded = STANDARD.decode(encoded).map_err(|_| anyhow!("Gemini 音频 Base64 无效"))?;
-                            audio_bytes = audio_bytes.checked_add(decoded.len()).ok_or_else(|| anyhow!("Gemini 音频消息超过大小限制"))?;
-                            if audio_bytes > MAX_AUDIO_BYTES_PER_MESSAGE { return Err(anyhow!("Gemini 音频消息超过大小限制")); }
-                            p.audio.push(decoded);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(p)
+    let value = decode_data_frame(DataFrameKind::Text, text.as_bytes())?;
+    parse_server_value(&value)
 }
 
 #[cfg(test)] mod tests {
