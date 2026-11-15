@@ -123,7 +123,9 @@ pub struct NativeSessionPort {
     task: Option<TransportTask>,
     audio: Option<NativeAudioTask>,
     playback: Option<NativePlaybackTask>,
+    mode: AudioSourceMode,
     microphone_device: Option<String>,
+    system_device: Option<String>,
     playback_device: Option<String>,
     playback_required: bool,
     microphone_ready: bool,
@@ -142,7 +144,9 @@ impl NativeSessionPort {
                 self.status.message = "网络已连接，正在打开麦克风".into();
                 self.events.push(UiEvent::Status(self.status.clone()));
                 self.audio = Some(NativeAudioTask::spawn(
+                    self.mode,
                     self.microphone_device.clone(),
+                    self.system_device.clone(),
                     self.token_saver,
                     task.audio_sender(),
                 ));
@@ -281,9 +285,10 @@ impl SessionPort for NativeSessionPort {
         if self.status.phase.is_active() || self.task.is_some() {
             return Err(anyhow!("原生会话已在运行或停止中"));
         }
+        #[cfg(not(target_os = "windows"))]
         if options.mode != AudioSourceMode::MicrophoneOnly {
             return Err(anyhow!(
-                "Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
+                "此平台的 Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
             ));
         }
         let phase = self.status.phase.transition(SessionEvent::StartRequested)?;
@@ -291,7 +296,9 @@ impl SessionPort for NativeSessionPort {
         self.status.message = "正在连接原生传输".into();
         self.status.transcription_only = options.model.is_transcription_only();
         self.events.push(UiEvent::Status(self.status.clone()));
+        self.mode = options.mode;
         self.microphone_device = options.microphone_device.clone();
+        self.system_device = options.system_device.clone();
         self.playback_device = options.playback_device.clone();
         self.playback_required = options.play_translation();
         self.microphone_ready = false;
@@ -397,6 +404,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn swr_nport_001_unverified_audio_modes_remain_fail_closed() {
         let mut port = NativeSessionPort::default();
@@ -405,7 +413,7 @@ mod tests {
         let error = port.start(&options).expect_err("audio gate must reject");
         assert_eq!(
             error.to_string(),
-            "Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
+            "此平台的 Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
         );
         assert_eq!(port.phase(), SessionPhase::Idle);
         assert!(port.poll_event().is_none());
