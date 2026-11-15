@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+  <key>CFBundleDisplayName</key><string>Gemini Live Translator</string>
+  <key>CFBundleExecutable</key><string>gemini-live-translator</string>
+  <key>CFBundleIdentifier</key><string>com.gemini.live.translator</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Gemini Live Translator</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>采集语音以进行实时翻译；音频将发送到 Gemini。</string>
+  <key>NSScreenCaptureUsageDescription</key><string>使用 ScreenCaptureKit 获取系统播放音频；不保存屏幕画面。</string>
+</dict></plist>

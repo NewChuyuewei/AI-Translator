@@ -14,34 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Frontend and Rust tests
+  rust-slint:
+    name: Core and Slint tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            .
-            src-tauri
-      - name: Install Linux build dependencies
+      - name: Install Linux native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libasound2-dev libfontconfig1-dev libxkbcommon-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev pkg-config
-      - run: npm ci
-      - run: npm run build
-      - run: npm run test:ui
-      - run: npm run test:version
-      - run: npm run test:android-config
-      - run: npm run test:assurance
+            libasound2-dev libfontconfig1-dev libxkbcommon-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev \
+            libayatana-appindicator3-dev pkg-config
+      - run: node scripts/check-version.mjs
+      - run: node tests/version_script_test.mjs
+      - run: node scripts/check-assurance.mjs
+      - run: node scripts/check-no-legacy-desktop.mjs
+      - run: node scripts/check-target-evidence.mjs
+      - run: node tests/target_evidence_test.mjs
       - name: Verify native Rust lockfile
         run: cargo metadata --locked --no-deps --format-version 1 >/dev/null
       - name: Verify native Rust formatting
@@ -49,9 +44,7 @@ jobs:
           if cargo fmt --all --check >rustfmt.log 2>&1; then exit 0; fi
           cat rustfmt.log
           details="$(tail -c 12000 rustfmt.log)"
-          details="${details//'%'/'%25'}"
-          details="${details//$'\r'/'%0D'}"
-          details="${details//$'\n'/'%0A'}"
+          details="${details//'%'/'%25'}"; details="${details//$'\r'/'%0D'}"; details="${details//$'\n'/'%0A'}"
           echo "::error title=Rust formatting failed::${details}"
           exit 1
       - name: Verify native Rust static analysis
@@ -59,50 +52,46 @@ jobs:
           if cargo clippy --workspace --all-targets --all-features --locked --message-format=short -- -D warnings >clippy.log 2>&1; then exit 0; fi
           cat clippy.log
           details="$(tail -c 12000 clippy.log | sed -r 's/\x1B\[[0-9;]*[mK]//g')"
-          details="${details//'%'/'%25'}"
-          details="${details//$'\r'/'%0D'}"
-          details="${details//$'\n'/'%0A'}"
+          details="${details//'%'/'%25'}"; details="${details//$'\r'/'%0D'}"; details="${details//$'\n'/'%0A'}"
           echo "::error title=Rust Clippy failed::${details}"
           exit 1
-      - name: Cross-check native window and lifecycle adapters
+      - name: Cross-check narrow platform adapters
         run: |
           rustup target add x86_64-pc-windows-gnu x86_64-apple-darwin
           cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-pc-windows-gnu
           cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-apple-darwin
-          if cargo check --locked -p macos-system-audio --target x86_64-apple-darwin >mac-check.log 2>&1; then exit 0; fi
-          cat mac-check.log
-          details="$(grep -E -i -B 4 -A 16 'error\[|error:|failed' mac-check.log | tail -c 12000)"
-          details="${details//'%'/'%25'}"
-          details="${details//$'\r'/'%0D'}"
-          details="${details//$'\n'/'%0A'}"
-          echo "::error title=macOS desktop cross-check failed::${details}"
-          exit 1
+          cargo check --locked -p macos-system-audio --target x86_64-apple-darwin
       - name: Test Rust workspace and compile Slint desktop
-        run: |
-          if cargo test --workspace --all-targets --locked >workspace-test.log 2>&1; then
-            cat workspace-test.log
-          else
-            cat workspace-test.log
-            details="$(grep -E -i -B 3 -A 12 'error\[|error:|failed|panicked' workspace-test.log | tail -c 12000)"
-            details="${details//'%'/'%25'}"
-            details="${details//$'\r'/'%0D'}"
-            details="${details//$'\n'/'%0A'}"
-            echo "::error title=Rust workspace tests failed::${details}"
-            exit 1
-          fi
-      - name: Run legacy Tauri adapter tests
-        run: |
-          if cargo test --manifest-path src-tauri/Cargo.toml --lib --locked >rust-test.log 2>&1; then
-            cat rust-test.log
-          else
-            cat rust-test.log
-            details="$(grep -E -i -B 3 -A 10 'error\[|error:|failed|panicked' rust-test.log | tail -c 12000)"
-            details="${details//'%'/'%25'}"
-            details="${details//$'\r'/'%0D'}"
-            details="${details//$'\n'/'%0A'}"
-            echo "::error title=Rust tests failed::${details}"
-            exit 1
-          fi
+        run: cargo test --workspace --all-targets --locked
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Collect unqualified structural coverage evidence
+        run: cargo llvm-cov --workspace --all-targets --locked --lcov --output-path coverage.lcov
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rust-structural-coverage
+          path: coverage.lcov
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop-native:
+    name: Native Slint ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            label: Windows x64
+          - os: macos-15
+            label: macOS Apple Silicon
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build native Slint release binary
+        run: cargo build --release --locked -p translator-desktop
+      - name: Run platform workspace tests
+        run: cargo test --workspace --locked
 
   android-native:
     name: Native Android Kotlin + JDK 25
@@ -128,9 +117,7 @@ jobs:
           else
             tail -n 240 android-native.log
             details="$(grep -E -i -B 4 -A 12 'FAILURE:|What went wrong:|^e: |error:|exception|could not|failed' android-native.log | tail -c 12000)"
-            details="${details//'%'/'%25'}"
-            details="${details//$'\r'/'%0D'}"
-            details="${details//$'\n'/'%0A'}"
+            details="${details//'%'/'%25'}"; details="${details//$'\r'/'%0D'}"; details="${details//$'\n'/'%0A'}"
             echo "::error title=Native Android build failed::${details}"
             exit 1
           fi
@@ -138,7 +125,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           root = Path("android/app/build")
           for filename in ("MainActivity.class", "SessionConfig.class"):
               matches = list(root.rglob(filename))

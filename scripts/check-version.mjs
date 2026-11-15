@@ -1,22 +1,32 @@
 import fs from 'node:fs';
 
 const packageVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
-const found = new Map();
+const found = new Map([['release metadata', packageVersion]]);
 const capture = (name, path, pattern) => {
   const match = fs.readFileSync(path, 'utf8').match(pattern);
   if (!match) throw new Error(`Could not read ${name} version from ${path}`);
   found.set(name, match[1]);
 };
 
-found.set('npm package', packageVersion);
-found.set('npm lock', JSON.parse(fs.readFileSync('package-lock.json', 'utf8')).version);
-found.set('Tauri config', JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')).version);
-found.set('legacy Android config', JSON.parse(fs.readFileSync('src-tauri/tauri.android.conf.json', 'utf8')).version);
 capture('Cargo workspace / Slint desktop', 'Cargo.toml', /\[workspace\.package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/);
-capture('legacy Tauri Cargo package', 'src-tauri/Cargo.toml', /\[package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/);
 capture('native Android', 'android/app/build.gradle.kts', /versionName\s*=\s*"([^"]+)"/);
 capture('Windows installer', 'packaging/windows-installer.nsi', /PRODUCT_VERSION "([^"]+)"/);
 capture('Windows portable readme', 'packaging/windows-portable-readme.txt', /^Gemini Live Translator ([^ ]+)/m);
+
+const workspaceCrates = [
+  'caption-platform',
+  'desktop-lifecycle',
+  'macos-system-audio',
+  'translator-core',
+  'translator-desktop',
+];
+const lock = fs.readFileSync('Cargo.lock', 'utf8');
+for (const crate of workspaceCrates) {
+  const escaped = crate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = lock.match(new RegExp(`\\[\\[package\\]\\]\\r?\\nname = "${escaped}"\\r?\\nversion = "([^"]+)"`));
+  if (!match) throw new Error(`Could not read ${crate} version from Cargo.lock`);
+  found.set(`Cargo.lock ${crate}`, match[1]);
+}
 
 const mismatches = [...found].filter(([, version]) => version !== packageVersion);
 if (mismatches.length) {
