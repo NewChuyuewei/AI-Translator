@@ -21,7 +21,7 @@
 | SWR-SESSION-002 | `SessionDriver::receive`、`encode_audio` | `swr_session_002_rejects_out_of_order_and_duplicate_events` |
 | SWR-SESSION-003 | `SessionDriver::close`、`DriverState::Closed` | `swr_session_003_close_is_deterministic_and_idempotence_is_rejected` |
 | SWR-PORT-001 | `BoundedEventQueue<T, CAPACITY>` | `swr_port_001_queue_is_bounded_and_freshness_first` |
-| SWR-PORT-002 | `SessionPort`、`MemorySessionPort`、Slint `PendingNativeSessionPort` | `swr_port_002_memory_port_enforces_lifecycle_and_publishes_typed_events` |
+| SWR-PORT-002 | `SessionPort`、`MemorySessionPort`、Slint `NativeSessionPort` | `swr_port_002_memory_port_enforces_lifecycle_and_publishes_typed_events` |
 | SWR-PORT-003 | `UiEvent`、`CaptionSnapshot::bounded`、`NoticeText` | `swr_port_003_ui_text_is_bounded_and_contains_no_pcm_variant` |
 | SWR-PORT-004 | `MemorySessionPort::start` 的模型状态约束 | `swr_port_004_transcription_mode_never_emits_translation_playback_state` |
 | SWR-DIAG-001 | `diagnostics::DiagnosticStore` | `swr_diag_001_store_is_bounded_monotonic_and_clearable`、前端水位线 mock 测试 |
@@ -63,6 +63,9 @@
 | SWR-NTRANS-004 | Slint `probe-transport` 后台线程、`probe-running` 门和安全错误映射 | 代码评审；UI 驱动待办 `ASSURANCE-UI-003` |
 | SWR-NTRANS-005 | `ProbeCancel`、分阶段 `tokio::select!`、可取消平台代理等待 | `swr_ntrans_005_setup_wait_is_cancellable`、退出回调代码评审 |
 | SWR-NTRANS-006 | `session_blocking`、共享 `establish_session`/`receive_message`/`close_session` | `swr_ntrans_006_session_forwards_messages_and_stops_once` |
+| SWR-NPORT-001 | Slint `NativeSessionPort` 的 `audio_path_verified` 关闭门 | `swr_nport_001_production_start_is_fail_closed_before_audio_verification` |
+| SWR-NPORT-002 | `TransportTask`、`BoundedEventQueue<WorkerEvent, 32>`、原子取消与延迟 join | `swr_nport_002_worker_mailbox_is_bounded_and_freshness_first`、生命周期代码评审 |
+| SWR-NPORT-003 | `NativeSessionPort::handle_worker_event`、Slint 25 ms/最多 32 项定时排空 | `swr_nport_003_worker_events_map_to_typed_ui_lifecycle`、UI 适配代码评审 |
 
 ## 开放验证项
 

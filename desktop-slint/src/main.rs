@@ -6,12 +6,14 @@ slint::include_modules!();
 
 mod config_store;
 mod device_provider;
+mod native_session;
 mod native_transport;
 
 use anyhow::anyhow;
 use config_store::ConfigStore;
 use device_provider::NativeDeviceProvider;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use native_session::NativeSessionPort;
+use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -19,40 +21,16 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 use translator_core::{
-    AudioSourceMode, ModelKind, ProxyMode, SessionOptions, SessionPhase, ThinkingLevel,
-    TranscriptionMode,
+    AudioSourceMode, ModelKind, ProxyMode, SessionOptions, ThinkingLevel, TranscriptionMode,
     devices::{AudioDevices, DeviceProvider},
     session_port::{SessionPort, UiEvent},
     settings::PersistedSettings,
     vault::SecretPayload,
 };
 use zeroize::Zeroize;
-
-/// v2.1.0 migration boundary: the shell uses the final typed port now, while
-/// the real socket/audio runtime remains disabled until its adapter is proven.
-#[derive(Default)]
-struct PendingNativeSessionPort;
-
-impl SessionPort for PendingNativeSessionPort {
-    fn start(&mut self, options: &SessionOptions) -> anyhow::Result<()> {
-        options.validate()?;
-        Err(anyhow!("原生会话适配器尚未完成验证；未采集或上传任何音频"))
-    }
-
-    fn stop(&mut self) -> anyhow::Result<()> {
-        Err(anyhow!("原生会话当前未运行"))
-    }
-
-    fn phase(&self) -> SessionPhase {
-        SessionPhase::Idle
-    }
-
-    fn poll_event(&mut self) -> Option<UiEvent> {
-        None
-    }
-}
 
 fn selected<T: Copy>(index: i32, values: &[T], safe_default: T) -> T {
     values
@@ -250,7 +228,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     };
 
-    let session = Rc::new(RefCell::new(PendingNativeSessionPort));
+    let session = Rc::new(RefCell::new(NativeSessionPort::default()));
     let device_provider = Rc::new(RefCell::new(NativeDeviceProvider));
     let devices = Rc::new(RefCell::new(AudioDevices::default()));
     let probe_cancel = Arc::new(AtomicBool::new(false));
@@ -268,14 +246,17 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(ui) = weak.upgrade() else {
             return;
         };
-        let options = options_from_ui(&ui, &callback_devices.borrow());
-        let result = callback_devices
-            .borrow()
-            .validate_selection(&options)
-            .and_then(|()| callback_session.borrow_mut().start(&options));
-        match result {
-            Ok(()) => ui.set_status_message("原生会话已启动".into()),
-            Err(error) => ui.set_status_message(error.to_string().into()),
+        let result = if callback_session.borrow().phase().is_active() {
+            callback_session.borrow_mut().stop()
+        } else {
+            let options = options_from_ui(&ui, &callback_devices.borrow());
+            callback_devices
+                .borrow()
+                .validate_selection(&options)
+                .and_then(|()| callback_session.borrow_mut().start(&options))
+        };
+        if let Err(error) = result {
+            ui.set_status_message(error.to_string().into());
         }
     });
 
@@ -474,9 +455,46 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    let event_control = control.as_weak();
+    let event_caption = caption.as_weak();
+    let event_session = Rc::clone(&session);
+    let session_timer = Timer::default();
+    session_timer.start(TimerMode::Repeated, Duration::from_millis(25), move || {
+        for _ in 0..32 {
+            let Some(event) = event_session.borrow_mut().poll_event() else {
+                break;
+            };
+            match event {
+                UiEvent::Status(status) => {
+                    if let Some(ui) = event_control.upgrade() {
+                        ui.set_session_running(status.phase.is_active());
+                        ui.set_status_message(status.message.into());
+                    }
+                }
+                UiEvent::Caption(caption) => {
+                    if let Some(window) = event_caption.upgrade() {
+                        window.set_original_text(caption.original.into());
+                        window.set_translated_text(caption.translated.into());
+                        window.set_transcription_only(caption.transcription_only);
+                    }
+                }
+                UiEvent::Notice(message) => {
+                    if let Some(ui) = event_control.upgrade() {
+                        ui.set_status_message(message.as_str().into());
+                    }
+                }
+            }
+        }
+    });
+
     let quit_cancel = Arc::clone(&probe_cancel);
+    let quit_session = Rc::clone(&session);
     control.on_quit_requested(move || {
         quit_cancel.store(true, Ordering::Release);
+        let session_active = quit_session.borrow().phase().is_active();
+        if session_active {
+            let _ = quit_session.borrow_mut().stop();
+        }
         let _ = slint::quit_event_loop();
     });
 
