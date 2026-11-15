@@ -32,6 +32,10 @@
 | SWR-SET-002 | `PersistedSettings`、`decode_settings` | `swr_set_002_current_format_round_trips_with_compatible_fields`、前端 mock 测试 |
 | SWR-SET-003 | `DecodedSettings::migration_required`、Tauri 原子写适配器 | `swr_set_003_legacy_migration_is_explicit_and_erases_secrets`、代码评审 |
 | SWR-SET-004 | `MAX_SETTINGS_BYTES`、`decode_settings` | `swr_set_004_rejects_oversize_corruption_and_unknown_versions` |
+| SWR-VAULT-001 | `vault::encrypt_secrets`、`decrypt_secrets`、固定 AAD | `swr_vault_001_round_trip_preserves_legacy_format_without_plaintext`、旧 Tauri 回归 |
+| SWR-VAULT-002 | `SystemRandom` salt/nonce、`Zeroize` 清理 | `swr_vault_002_random_nonce_prevents_repeat_ciphertext`、代码评审 |
+| SWR-VAULT-003 | `decrypt_secrets` 认证和安全错误映射 | `swr_vault_003_wrong_password_and_tampering_share_safe_error` |
+| SWR-VAULT-004 | `MAX_VAULT_BYTES`、格式和 KDF 边界检查 | `swr_vault_004_bounds_password_input_and_format_parameters` |
 
 ## 开放验证项
 

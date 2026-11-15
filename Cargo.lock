@@ -4550,6 +4550,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "percent-encoding",
+ "ring",
  "serde",
  "serde_json",
  "url",

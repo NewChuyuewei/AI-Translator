@@ -7,7 +7,6 @@ mod proxy;
 
 use anyhow::{anyhow, Context, Result};
 use audio_player::AudioPlayer;
-use base64::{engine::general_purpose::STANDARD, Engine};
 use audio_router::{AudioRouter, AudioSourceMode};
 #[cfg(not(target_os = "android"))]
 use audio_router::AudioConfig;
@@ -15,10 +14,9 @@ use diagnostics::{LogEntry, LogStore, Trace};
 use futures_util::{SinkExt, StreamExt};
 use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, ThinkingLevel, TranscriptionMode};
 use proxy::ProxyMode;
-use translator_core::{checked_overlay_scale, settings::{decode_settings, encode_settings, settings_for_storage, PersistedSettings}, SessionEvent, SessionOptions as StartOptions, SessionPhase, SessionStatus as Status};
-use ring::{aead, pbkdf2, rand::{SecureRandom, SystemRandom}};
+use translator_core::{checked_overlay_scale, settings::{decode_settings, encode_settings, settings_for_storage, PersistedSettings}, vault::{decrypt_secrets, encrypt_secrets, SecretPayload}, SessionEvent, SessionOptions as StartOptions, SessionPhase, SessionStatus as Status};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io::{Read, Write}, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
+use std::{collections::HashSet, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroize;
@@ -42,31 +40,8 @@ fn validate_options(options: &StartOptions) -> Result<()> {
 
 const SETTINGS_FILE: &str = "settings.json";
 const SECRETS_FILE: &str = "secrets.enc.json";
-const SECRET_AAD: &[u8] = b"com.gemini.live.translator/secrets/v1";
-const PBKDF2_ITERATIONS: u32 = 210_000;
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SecretPayload { api_key: String, proxy_url: String }
-impl Drop for SecretPayload {
-    fn drop(&mut self) {
-        self.api_key.zeroize();
-        self.proxy_url.zeroize();
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EncryptedSecrets {
-    version: u8,
-    algorithm: String,
-    iterations: u32,
-    salt: String,
-    nonce: String,
-    ciphertext: String,
-}
 
 fn config_path(app: &AppHandle, name: &str) -> Result<PathBuf> {
     Ok(app.path().app_config_dir().context("无法定位应用配置目录")?.join(name))
@@ -154,66 +129,6 @@ fn read_settings(app: &AppHandle) -> Result<Option<PersistedSettings>> {
         write_settings(app, &decoded.settings).context("无法迁移旧用户设置")?;
     }
     Ok(Some(decoded.settings))
-}
-
-fn validate_vault_password(password: &str) -> Result<()> {
-    if password.as_bytes().len() < 8 { return Err(anyhow!("加密密码至少需要 8 个字符")); }
-    if password.as_bytes().len() > 1024 { return Err(anyhow!("加密密码过长")); }
-    Ok(())
-}
-
-fn derive_vault_key(password: &str, salt: &[u8], iterations: u32) -> Result<[u8; 32]> {
-    let rounds = NonZeroU32::new(iterations).ok_or_else(|| anyhow!("加密配置迭代次数无效"))?;
-    let mut key = [0u8; 32];
-    pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256, rounds, salt, password.as_bytes(), &mut key);
-    Ok(key)
-}
-
-fn encrypt_secrets(password: &str, payload: &SecretPayload) -> Result<Vec<u8>> {
-    validate_vault_password(password)?;
-    if payload.api_key.trim().is_empty() { return Err(anyhow!("保存加密配置前请填写 API Key")); }
-    let random = SystemRandom::new();
-    let mut salt = [0u8; 16]; let mut nonce = [0u8; 12];
-    random.fill(&mut salt).map_err(|_| anyhow!("无法生成加密随机数"))?;
-    random.fill(&mut nonce).map_err(|_| anyhow!("无法生成加密随机数"))?;
-    let mut key_bytes = derive_vault_key(password, &salt, PBKDF2_ITERATIONS)?;
-    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化加密器"));
-    key_bytes.fill(0);
-    let key = aead::LessSafeKey::new(unbound?);
-    let mut plaintext = serde_json::to_vec(payload).context("无法编码敏感配置")?;
-    key.seal_in_place_append_tag(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut plaintext)
-        .map_err(|_| anyhow!("无法加密敏感配置"))?;
-    let encrypted = EncryptedSecrets {
-        version: 1, algorithm: "AES-256-GCM/PBKDF2-HMAC-SHA256".into(), iterations: PBKDF2_ITERATIONS,
-        salt: STANDARD.encode(salt), nonce: STANDARD.encode(nonce), ciphertext: STANDARD.encode(plaintext),
-    };
-    serde_json::to_vec_pretty(&encrypted).context("无法编码加密配置")
-}
-
-fn decrypt_secrets(password: &str, bytes: &[u8]) -> Result<SecretPayload> {
-    validate_vault_password(password)?;
-    let encrypted: EncryptedSecrets = serde_json::from_slice(bytes).map_err(|_| anyhow!("加密配置已损坏"))?;
-    if encrypted.version != 1 || encrypted.algorithm != "AES-256-GCM/PBKDF2-HMAC-SHA256"
-        || !(100_000..=2_000_000).contains(&encrypted.iterations) {
-        return Err(anyhow!("不支持的加密配置格式"));
-    }
-    let salt_bytes = STANDARD.decode(&encrypted.salt).map_err(|_| anyhow!("加密配置已损坏"))?;
-    let salt: [u8; 16] = salt_bytes.try_into().map_err(|_| anyhow!("加密配置已损坏"))?;
-    let nonce_bytes = STANDARD.decode(&encrypted.nonce).map_err(|_| anyhow!("加密配置已损坏"))?;
-    let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| anyhow!("加密配置已损坏"))?;
-    let mut ciphertext = STANDARD.decode(&encrypted.ciphertext).map_err(|_| anyhow!("加密配置已损坏"))?;
-    let mut key_bytes = derive_vault_key(password, &salt, encrypted.iterations)?;
-    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &key_bytes).map_err(|_| anyhow!("无法初始化解密器"));
-    key_bytes.fill(0);
-    let key = aead::LessSafeKey::new(unbound?);
-    let plaintext_len = {
-        let plaintext = key.open_in_place(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::from(SECRET_AAD), &mut ciphertext)
-            .map_err(|_| anyhow!("密码错误或加密配置已损坏"))?;
-        plaintext.len()
-    };
-    let result = serde_json::from_slice(&ciphertext[..plaintext_len]).map_err(|_| anyhow!("密码错误或加密配置已损坏"));
-    ciphertext.fill(0);
-    result
 }
 
 fn write_encrypted_secrets(app: &AppHandle, password: &str, payload: &SecretPayload) -> Result<()> {
