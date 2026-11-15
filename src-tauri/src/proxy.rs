@@ -1,14 +1,21 @@
 //! Select a route without changing the machine's network settings. Proxy
 //! credentials never enter logs, errors, the Gemini URL, or the TLS handshake.
 use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use std::{net::IpAddr, time::Duration};
 use tauri::AppHandle;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::watch};
 use url::Host;
 pub use translator_core::ProxyMode;
-use translator_core::proxy::{ProxyEndpoint as Proxy, ProxyKind as Kind};
+use translator_core::{
+    proxy::{ProxyEndpoint as Proxy, ProxyKind as Kind},
+    proxy_handshake::{
+        SocksAuthMethod, SocksReplyAddress, http_connect_request, parse_http_connect_response,
+        parse_socks_auth_response, parse_socks_method, parse_socks_reply_prefix,
+        socks_auth_request, socks_connect_request, socks_greeting, socks_reply_tail_len,
+        MAX_HTTP_CONNECT_HEADER_BYTES,
+    },
+};
 
 // PAC/ProxySelector expect the HTTPS form of the actual WebSocket destination;
 // no API key or other secret is included in the URL supplied to the resolver.
@@ -125,83 +132,39 @@ pub async fn resolve(app: &AppHandle, mode: ProxyMode, address: &str, cancel: &m
     }
 }
 
-fn authority(host: &str, port: u16) -> String {
-    if host.trim_matches(['[', ']']).parse::<std::net::Ipv6Addr>().is_ok() {
-        format!("[{}]:{port}", host.trim_matches(['[', ']']))
-    } else { format!("{host}:{port}") }
-}
-
 async fn http_tunnel(stream: &mut TcpStream, proxy: &Proxy, host: &str, port: u16) -> Result<()> {
-    let target = authority(host, port);
-    let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
-    if let Some(c) = &proxy.credentials {
-        let mut pair = c.username.clone(); pair.push(b':'); pair.extend_from_slice(&c.password);
-        request.push_str(&format!("Proxy-Authorization: Basic {}\r\n", STANDARD.encode(pair)));
-    }
-    request.push_str("\r\n");
-    stream.write_all(request.as_bytes()).await.context("向 HTTP 代理发送 CONNECT 失败")?;
-    // Consume precisely the CONNECT header, not any subsequent tunnel bytes.
-    // The bound prevents an untrusted proxy from exhausting memory.
+    let request = http_connect_request(proxy, host, port)?;
+    stream.write_all(request.as_slice()).await.context("向 HTTP 代理发送 CONNECT 失败")?;
     let mut header = Vec::with_capacity(512);
     while !header.ends_with(b"\r\n\r\n") {
-        if header.len() >= 16 * 1024 { return Err(anyhow!("HTTP 代理响应头过长")); }
+        if header.len() >= MAX_HTTP_CONNECT_HEADER_BYTES { return Err(anyhow!("HTTP 代理响应头过长")); }
         header.push(stream.read_u8().await.context("读取 HTTP 代理响应失败")?);
     }
-    let first_line = header.split(|b| *b == b'\n').next().unwrap_or_default();
-    let first_line = std::str::from_utf8(first_line).map_err(|_| anyhow!("HTTP 代理响应无效"))?;
-    let mut fields = first_line.split_ascii_whitespace();
-    let version = fields.next().unwrap_or("");
-    let code = fields.next().and_then(|v| v.parse::<u16>().ok()).unwrap_or(0);
-    if version != "HTTP/1.0" && version != "HTTP/1.1" { return Err(anyhow!("HTTP 代理响应无效")); }
-    match code {
-        200..=299 => Ok(()),
-        407 => Err(anyhow!("HTTP 代理要求认证（407）；可在手动代理地址中填写用户名和密码")),
-        100..=599 => Err(anyhow!("HTTP 代理拒绝连接（状态码 {code}）")),
-        _ => Err(anyhow!("HTTP 代理响应无效")),
-    }
+    parse_http_connect_response(&header)
 }
 
 async fn socks_tunnel(stream: &mut TcpStream, proxy: &Proxy, host: &str, port: u16) -> Result<()> {
-    if proxy.credentials.is_some() { stream.write_all(&[5, 2, 2, 0]).await?; }
-    else { stream.write_all(&[5, 1, 0]).await?; }
-    let mut greeting = [0; 2]; stream.read_exact(&mut greeting).await.context("读取 SOCKS5 协商失败")?;
-    if greeting[0] != 5 { return Err(anyhow!("代理不是 SOCKS5 服务")); }
-    match greeting[1] {
-        0 => {},
-        2 => {
-            let c = proxy.credentials.as_ref().ok_or_else(|| anyhow!("SOCKS5 代理要求用户名和密码；请使用手动代理"))?;
-            if c.username.is_empty() || c.username.len() > 255 || c.password.len() > 255 {
-                return Err(anyhow!("SOCKS5 用户名或密码长度无效"));
-            }
-            let mut auth = vec![1, c.username.len() as u8];
-            auth.extend_from_slice(&c.username); auth.push(c.password.len() as u8); auth.extend_from_slice(&c.password);
-            stream.write_all(&auth).await.context("SOCKS5 认证通信失败")?;
-            let mut answer = [0; 2]; stream.read_exact(&mut answer).await.context("读取 SOCKS5 认证响应失败")?;
-            if answer != [1, 0] { return Err(anyhow!("SOCKS5 代理认证失败")); }
-        }
-        0xff => return Err(anyhow!("SOCKS5 代理拒绝认证方式；请检查用户名和密码")),
-        _ => return Err(anyhow!("SOCKS5 代理要求不支持的认证方式")),
+    stream.write_all(socks_greeting(proxy.credentials.is_some())).await?;
+    let mut greeting = [0; 2];
+    stream.read_exact(&mut greeting).await.context("读取 SOCKS5 协商失败")?;
+    if parse_socks_method(greeting, proxy.credentials.is_some())? == SocksAuthMethod::UsernamePassword {
+        let credentials = proxy.credentials.as_ref().ok_or_else(|| anyhow!("SOCKS5 代理要求用户名和密码；请使用手动代理"))?;
+        let request = socks_auth_request(credentials)?;
+        stream.write_all(request.as_slice()).await.context("SOCKS5 认证通信失败")?;
+        let mut answer = [0; 2];
+        stream.read_exact(&mut answer).await.context("读取 SOCKS5 认证响应失败")?;
+        parse_socks_auth_response(answer)?;
     }
-    let mut connect = vec![5, 1, 0];
-    let unbracketed = host.trim_matches(['[', ']']);
-    match unbracketed.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => { connect.push(1); connect.extend_from_slice(&ip.octets()); },
-        Ok(IpAddr::V6(ip)) => { connect.push(4); connect.extend_from_slice(&ip.octets()); },
-        Err(_) => {
-            if unbracketed.is_empty() || unbracketed.len() > 255 || !unbracketed.is_ascii() {
-                return Err(anyhow!("目标主机名无效"));
-            }
-            // Proxy resolves the target hostname, avoiding local DNS leakage.
-            connect.push(3); connect.push(unbracketed.len() as u8); connect.extend_from_slice(unbracketed.as_bytes());
-        },
-    }
-    connect.extend_from_slice(&port.to_be_bytes());
+    let connect = socks_connect_request(host, port)?;
     stream.write_all(&connect).await.context("向 SOCKS5 代理发送连接请求失败")?;
-    let mut reply = [0; 4]; stream.read_exact(&mut reply).await.context("读取 SOCKS5 连接响应失败")?;
-    if reply[0] != 5 || reply[2] != 0 { return Err(anyhow!("SOCKS5 连接响应无效")); }
-    if reply[1] != 0 { return Err(anyhow!("SOCKS5 代理拒绝目标连接（代码 {}）", reply[1])); }
-    let size = match reply[3] { 1 => 4, 4 => 16, 3 => stream.read_u8().await? as usize, _ => return Err(anyhow!("SOCKS5 响应地址类型无效")) };
-    let mut bound = vec![0; size + 2]; stream.read_exact(&mut bound).await.context("读取 SOCKS5 响应地址失败")?;
+    let mut reply = [0; 4];
+    stream.read_exact(&mut reply).await.context("读取 SOCKS5 连接响应失败")?;
+    let address = parse_socks_reply_prefix(reply)?;
+    let domain_length = if address == SocksReplyAddress::DomainLengthPending {
+        Some(stream.read_u8().await.context("读取 SOCKS5 响应域名长度失败")?)
+    } else { None };
+    let mut bound = vec![0; socks_reply_tail_len(address, domain_length)?];
+    stream.read_exact(&mut bound).await.context("读取 SOCKS5 响应地址失败")?;
     Ok(())
 }
 
@@ -236,7 +199,6 @@ mod tests {
         let cred = http.credentials.unwrap(); assert_eq!(cred.username, b"alice"); assert_eq!(cred.password, b"p@ss:word");
         let socks = parse_proxy("socks5h://[::1]:1080").unwrap();
         assert!(socks.kind == Kind::Socks5); assert_eq!(socks.host, "::1");
-        assert_eq!(authority("::1", 443), "[::1]:443");
         for invalid in ["http://alice:secret@example.com:123/path", "https://alice:secret@example.com:444", "socks5://alice:secret@example.com", "nope://alice:secret@example.com:1", "http://alice:secret@example.com:80/?q=secret"] {
             let error = parse_proxy(invalid).err().unwrap().to_string();
             assert!(!error.contains("secret")); assert!(!error.contains("alice"));
