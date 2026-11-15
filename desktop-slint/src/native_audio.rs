@@ -298,6 +298,8 @@ fn run_capture(
     }
     let (raw_sender, raw_receiver) = mpsc::sync_channel(RAW_QUEUE_CHUNKS);
     #[cfg(target_os = "macos")]
+    let mac_capture_failed = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "macos")]
     let mac_system_capture = if mode.wants_system_audio() {
         if system_device
             .filter(|value| !value.is_empty())
@@ -307,17 +309,21 @@ fn run_capture(
         }
         Some(macos_system_audio::MacSystemCapture::start({
             let raw_sender = raw_sender.clone();
+            let capture_failed = Arc::clone(&mac_capture_failed);
             move |event| {
-                let event = match event {
-                    macos_system_audio::CaptureEvent::Data(chunk) => RawEvent::Data(RawChunk {
-                        source: CaptureSource::System,
-                        sample_rate: chunk.sample_rate,
-                        channels: chunk.channels,
-                        samples: chunk.samples,
-                    }),
-                    macos_system_audio::CaptureEvent::Failed => RawEvent::Failed,
-                };
-                let _ = raw_sender.try_send(event);
+                match event {
+                    macos_system_audio::CaptureEvent::Data(chunk) => {
+                        let _ = raw_sender.try_send(RawEvent::Data(RawChunk {
+                            source: CaptureSource::System,
+                            sample_rate: chunk.sample_rate,
+                            channels: chunk.channels,
+                            samples: chunk.samples,
+                        }));
+                    }
+                    macos_system_audio::CaptureEvent::Failed => {
+                        capture_failed.store(true, Ordering::Release);
+                    }
+                }
             }
         })?)
     } else {
@@ -358,6 +364,10 @@ fn run_capture(
     let mut mixer = AudioMixer::new(mode, token_saver);
     let mut next_frame = Instant::now() + FRAME_DURATION;
     while !stop.load(Ordering::Acquire) {
+        #[cfg(target_os = "macos")]
+        if mac_capture_failed.load(Ordering::Acquire) {
+            return Err(anyhow!("ScreenCaptureKit 系统音频流已停止或返回无效格式"));
+        }
         let wait = next_frame
             .saturating_duration_since(Instant::now())
             .min(Duration::from_millis(20));
