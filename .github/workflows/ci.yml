@@ -42,7 +42,18 @@ jobs:
       - run: npm run test:version
       - run: npm run test:android-config
       - name: Test Rust workspace and compile Slint desktop
-        run: cargo test --workspace --all-targets
+        run: |
+          if cargo test --workspace --all-targets >workspace-test.log 2>&1; then
+            cat workspace-test.log
+          else
+            cat workspace-test.log
+            details="$(grep -E -i -B 3 -A 12 'error\[|error:|failed|panicked' workspace-test.log | tail -c 12000)"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            echo "::error title=Rust workspace tests failed::${details}"
+            exit 1
+          fi
       - name: Run legacy Tauri adapter tests
         run: |
           if cargo test --manifest-path src-tauri/Cargo.toml --lib --locked >rust-test.log 2>&1; then
