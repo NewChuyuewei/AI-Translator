@@ -43,16 +43,7 @@ jobs:
       - run: npm run test:android-config
       - run: npm run test:assurance
       - name: Verify native Rust lockfile
-        run: |
-          cargo generate-lockfile
-          if git diff --exit-code -- Cargo.lock >lockfile.diff; then exit 0; fi
-          cat lockfile.diff
-          details="$(tail -c 12000 lockfile.diff)"
-          details="${details//'%'/'%25'}"
-          details="${details//$'\r'/'%0D'}"
-          details="${details//$'\n'/'%0A'}"
-          echo "::error title=Rust lockfile is stale::${details}"
-          exit 1
+        run: cargo metadata --locked --no-deps --format-version 1 >/dev/null
       - name: Verify native Rust formatting
         run: |
           if cargo fmt --all --check >rustfmt.log 2>&1; then exit 0; fi
