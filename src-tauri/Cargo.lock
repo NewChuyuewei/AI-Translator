@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-translator"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1249,6 +1249,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "translator-core",
  "url",
  "zeroize",
 ]
@@ -4359,6 +4360,16 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
+
+[[package]]
+name = "translator-core"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "url",
+ "zeroize",
+]
 
 [[package]]
 name = "tracing"

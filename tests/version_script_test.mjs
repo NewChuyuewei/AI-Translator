@@ -10,6 +10,7 @@ const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'translator-version-test
 const files = [
   'package.json',
   'package-lock.json',
+  'Cargo.toml',
   'src-tauri/tauri.conf.json',
   'src-tauri/tauri.android.conf.json',
   'android/app/build.gradle.kts',
@@ -47,6 +48,8 @@ try {
   assert.match(nativeAndroid, /versionCode\s*=\s*7008009/);
   assert.match(nativeAndroid, /versionName\s*=\s*"7\.8\.9"/);
 
+  const workspaceCargo = fs.readFileSync(path.join(workspace, 'Cargo.toml'), 'utf8');
+  assert.match(workspaceCargo, /\[workspace\.package\][\s\S]*?version\s*=\s*"7\.8\.9"/);
   const cargoToml = fs.readFileSync(path.join(workspace, 'src-tauri/Cargo.toml'), 'utf8');
   const cargoLock = fs.readFileSync(path.join(workspace, 'src-tauri/Cargo.lock'), 'utf8');
   assert.match(cargoToml, /\[package\][\s\S]*?version\s*=\s*"7\.8\.9"/);

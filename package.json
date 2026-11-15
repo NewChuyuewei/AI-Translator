@@ -13,7 +13,7 @@
     "build": "vite build",
     "tauri": "tauri",
     "test:ui": "node tests/ui_mock_test.mjs && node tests/overlay_mock_test.mjs",
-    "test:version": "node tests/version_script_test.mjs",
+    "test:version": "node scripts/check-version.mjs && node tests/version_script_test.mjs",
     "test:android-config": "node tests/android_gradle_config_test.mjs"
   },
   "dependencies": {

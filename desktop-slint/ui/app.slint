@@ -1,0 +1,130 @@
+import { Button, CheckBox, ComboBox, LineEdit, Slider, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component CaptionWindow inherits Window {
+    title: "Gemini Live Translator · 字幕";
+    width: 760px;
+    height: 138px;
+    background: #101820e8;
+    property <string> original-text: "等待语音输入…";
+    property <string> translated-text: "翻译将在这里显示";
+    property <float> caption-scale: 1.0;
+    property <bool> transcription-only: false;
+
+    VerticalBox {
+        padding: 15px;
+        spacing: 7px;
+        Text { text: root.original-text; color: #e8eef2; font-size: 16px * root.caption-scale; overflow: elide; }
+        Text {
+            visible: !root.transcription-only;
+            text: root.translated-text;
+            color: #87e8c7;
+            font-size: 20px * root.caption-scale;
+            font-weight: 700;
+            overflow: elide;
+        }
+    }
+}
+
+export component ControlWindow inherits Window {
+    title: "Gemini Live Translator · Slint 迁移预览";
+    width: 620px;
+    height: 820px;
+    min-width: 440px;
+    min-height: 640px;
+    background: #f5f7f8;
+
+    in-out property <string> api-key: "";
+    in-out property <int> model-index: 0;
+    in-out property <int> target-index: 0;
+    in-out property <int> source-index: 0;
+    in-out property <int> proxy-index: 0;
+    in-out property <string> proxy-url: "";
+    in-out property <bool> bidirectional: false;
+    in-out property <bool> token-saver: true;
+    in-out property <bool> playback-enabled: false;
+    in-out property <bool> overlay-locked: true;
+    in-out property <float> overlay-scale: 1.0;
+    in-out property <bool> session-running: false;
+    in-out property <string> status-message: "Slint 桌面迁移预览 · 尚未连接会话后端";
+
+    callback start-stop();
+    callback refresh-devices();
+    callback toggle-overlay-lock();
+    callback overlay-scale-changed(float);
+    callback quit-requested();
+
+    VerticalBox {
+        padding: 24px;
+        spacing: 13px;
+
+        Text { text: "LIVE / TRANSLATOR"; color: #0b6b57; font-size: 14px; font-weight: 700; }
+        Text { text: "实时语音翻译与转写."; color: #14242c; font-size: 28px; font-weight: 700; }
+        Rectangle { height: 1px; background: #d7dfe2; }
+
+        Text { text: "01 连接配置"; color: #14242c; font-size: 17px; font-weight: 700; }
+        Text { text: "Gemini API Key"; color: #44545b; }
+        LineEdit { text <=> root.api-key; input-type: password; placeholder-text: "输入 API Key（不会进入普通设置或日志）"; }
+        HorizontalBox {
+            spacing: 10px;
+            ComboBox {
+                current-index <=> root.model-index;
+                model: ["Gemini 3.8 Live", "3.8 Extended Thinking", "3.5 Live Translate", "3.5 Transcribe Live"];
+            }
+            ComboBox {
+                current-index <=> root.target-index;
+                model: ["中文", "English", "日本語", "한국어", "Español", "Français", "Deutsch", "Italiano"];
+            }
+        }
+        CheckBox { text: "双向自动切换"; checked <=> root.bidirectional; }
+        HorizontalBox {
+            spacing: 10px;
+            ComboBox { current-index <=> root.proxy-index; model: ["自动代理 / VPN", "手动代理", "系统网络直连"]; }
+            LineEdit { enabled: root.proxy-index == 1; text <=> root.proxy-url; placeholder-text: "http://127.0.0.1:7890"; }
+        }
+
+        Rectangle { height: 1px; background: #d7dfe2; }
+        Text { text: "02 音频与设备"; color: #14242c; font-size: 17px; font-weight: 700; }
+        HorizontalBox {
+            spacing: 10px;
+            ComboBox { current-index <=> root.source-index; model: ["麦克风", "系统音频", "混合音源"]; }
+            Button { text: "刷新设备"; clicked => { root.refresh-devices(); } }
+        }
+        HorizontalBox {
+            spacing: 20px;
+            CheckBox { text: "静音时节省 Token"; checked <=> root.token-saver; }
+            CheckBox { text: "播放翻译语音"; checked <=> root.playback-enabled; enabled: root.model-index != 3; }
+        }
+
+        Rectangle { height: 1px; background: #d7dfe2; }
+        Text { text: "03 字幕窗口"; color: #14242c; font-size: 17px; font-weight: 700; }
+        HorizontalBox {
+            spacing: 12px;
+            Button { text: root.overlay-locked ? "解锁字幕窗" : "锁定字幕窗"; clicked => { root.toggle-overlay-lock(); } }
+            Text { text: "缩放 " + round(root.overlay-scale * 100) + "%"; vertical-alignment: center; color: #44545b; }
+            Slider { minimum: 0.8; maximum: 1.6; value <=> root.overlay-scale; changed(value) => { root.overlay-scale-changed(value); } }
+        }
+
+        Rectangle { height: 1px; background: #d7dfe2; }
+        Rectangle {
+            height: 66px;
+            border-radius: 8px;
+            background: root.session-running ? #dff7ee : #e9eef0;
+            Text {
+                x: 14px; width: parent.width - 28px; height: parent.height;
+                text: root.status-message; color: #24434a; vertical-alignment: center; wrap: word-wrap;
+            }
+        }
+        HorizontalBox {
+            spacing: 12px;
+            Button { text: "退出"; clicked => { root.quit-requested(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: root.session-running ? "停止" : "验证并开始"; primary: true; clicked => { root.start-stop(); } }
+        }
+        Text {
+            text: "v1.1.0 migration build · Rust 1.100 · Slint 1.18.1";
+            color: #718087;
+            horizontal-alignment: center;
+            font-size: 11px;
+        }
+    }
+}

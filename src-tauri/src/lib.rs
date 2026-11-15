@@ -15,6 +15,7 @@ use diagnostics::{LogEntry, LogStore, Trace};
 use futures_util::{SinkExt, StreamExt};
 use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, ThinkingLevel, TranscriptionMode};
 use proxy::ProxyMode;
+use translator_core::{checked_overlay_scale, SessionOptions as StartOptions, SessionStatus as Status};
 use ring::{aead, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::{Read, Write}, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
@@ -22,54 +23,21 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroize;
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StartOptions {
-    api_key: String, model: ModelKind, target_language: String,
-    #[serde(default)] thinking_level: ThinkingLevel,
-    #[serde(default)] transcription_mode: TranscriptionMode,
-    #[serde(default)] bidirectional: bool,
-    #[serde(default = "default_other")] other_language: String,
-    mode: AudioSourceMode,
-    #[serde(default)] microphone_device: Option<String>,
-    #[serde(default)] system_device: Option<String>,
-    #[serde(default)] playback_enabled: bool,
-    #[serde(default)] playback_device: Option<String>,
-    #[serde(default = "default_token_saver")] token_saver: bool,
-    #[serde(default)] proxy_mode: ProxyMode,
-    #[serde(default)] proxy_url: String,
-    #[serde(default = "default_overlay_scale")] overlay_scale: f64,
+trait OptionsExt {
+    fn gemini(&self) -> GeminiOptions;
+    #[cfg(not(target_os = "android"))]
+    fn audio(&self) -> AudioConfig;
 }
-fn default_other() -> String { "en".into() }
-fn default_overlay_scale() -> f64 { 1.0 }
-fn default_token_saver() -> bool { true }
-impl Drop for StartOptions {
-    fn drop(&mut self) {
-        self.api_key.zeroize();
-        self.proxy_url.zeroize();
-    }
-}
-impl StartOptions {
+impl OptionsExt for StartOptions {
     fn gemini(&self) -> GeminiOptions { GeminiOptions { api_key: self.api_key.clone(), model: self.model, thinking_level: self.thinking_level, transcription_mode: self.transcription_mode, target_language: self.target_language.clone(), bidirectional: self.bidirectional, other_language: self.other_language.clone() } }
     #[cfg(not(target_os = "android"))]
     fn audio(&self) -> AudioConfig { AudioConfig { mode: self.mode, microphone_device: self.microphone_device.clone(), system_device: self.system_device.clone() } }
-    fn validate(&self) -> Result<()> {
-        self.gemini().validate()?;
-        checked_overlay_scale(self.overlay_scale)?;
-        if self.proxy_url.len() > 2048 || self.proxy_url.chars().any(char::is_control) {
-            return Err(anyhow!("代理地址过长或含控制字符"));
-        }
-        for name in [&self.microphone_device, &self.system_device, &self.playback_device].into_iter().flatten() {
-            if name.len() > 1024 || name.chars().any(char::is_control) {
-                return Err(anyhow!("音频设备名称过长或含控制字符"));
-            }
-        }
-        if self.model.is_transcription_only() && self.playback_enabled {
-            return Err(anyhow!("实时转写模型不输出译音，请关闭译音播放"));
-        }
-        proxy::validate(self.proxy_mode, &self.proxy_url)
-    }
-    fn play_translation(&self) -> bool { self.playback_enabled && !self.model.is_transcription_only() }
+}
+
+fn validate_options(options: &StartOptions) -> Result<()> {
+    options.validate()?;
+    options.gemini().validate()?;
+    proxy::validate(options.proxy_mode, &options.proxy_url)
 }
 
 const SETTINGS_VERSION: u8 = 2;
@@ -300,12 +268,6 @@ fn read_encrypted_secrets(app: &AppHandle, password: &str) -> Result<SecretPaylo
     decrypt_secrets(password, &bytes)
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Status { phase: String, message: String, shortcut_available: bool, overlay_locked: bool, platform: String, network_route: String, transcription_only: bool, overlay_scale: f64 }
-impl Default for Status {
-    fn default() -> Self { Self { phase:"idle".into(), message:"准备就绪".into(), shortcut_available:false, overlay_locked:true, platform: std::env::consts::OS.into(), network_route:"尚未检测".into(), transcription_only:false, overlay_scale:1.0 } }
-}
 struct Inner { status: Status, last: Option<StartOptions>, cancel: Option<watch::Sender<bool>>, generation: u64 }
 struct Controller(Mutex<Inner>);
 // The native Android service can outlive an Activity. IDs must remain
@@ -317,12 +279,6 @@ impl Default for Controller {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Subtitle { original: String, translated: String, transcription_only: bool }
-fn checked_overlay_scale(scale: f64) -> Result<f64> {
-    if !scale.is_finite() || !(0.8..=1.6).contains(&scale) {
-        return Err(anyhow!("字幕缩放比例必须在 80% 到 160% 之间"));
-    }
-    Ok((scale * 10.0).round() / 10.0)
-}
 fn resize_overlay(app: &AppHandle, scale: f64) -> Result<()> {
     #[cfg(not(any(target_os="android", target_os="ios")))]
     if let Some(window) = app.get_webview_window("main") {
@@ -348,7 +304,7 @@ fn set_network_route(app: &AppHandle, generation: u64, route: &str) {
     let status = inner.status.clone(); drop(inner); publish(app, &status);
 }
 fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
-    if let Err(error) = options.validate() {
+    if let Err(error) = validate_options(&options) {
         let trace = Trace::for_app(app.clone(), 0, &options.api_key, &options.proxy_url);
         trace.warn("开始失败：连接配置校验未通过，请查看界面提示");
         return Err(error);

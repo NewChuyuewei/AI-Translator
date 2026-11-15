@@ -9,6 +9,7 @@ use std::{collections::HashSet, time::{Duration, Instant}};
 use tokio::{net::TcpStream, sync::watch};
 use tokio_tungstenite::{client_async_tls_with_config, tungstenite::{client::IntoClientRequest, http::HeaderValue, protocol::WebSocketConfig, Error as WsError, Message}, MaybeTlsStream, WebSocketStream};
 use crate::{diagnostics::Trace, proxy::{self, Route}};
+pub use translator_core::{ModelKind, ThinkingLevel, TranscriptionMode};
 
 const ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const MAX_SERVER_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
@@ -16,30 +17,6 @@ const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024;
 const MAX_AUDIO_BYTES_PER_MESSAGE: usize = 1024 * 1024;
 pub type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelKind {
-    GeneralLive,
-    // Preserve compatibility with the option used by the previous release.
-    #[serde(alias = "live_translate")]
-    ExtendedThinking,
-    #[serde(rename = "live_translate_35")]
-    LiveTranslate35,
-    #[serde(rename = "transcribe_live_35")]
-    TranscribeLive35,
-}
-impl ModelKind {
-    pub fn is_transcription_only(self) -> bool { self == Self::TranscribeLive35 }
-    pub fn supports_bidirectional_instruction(self) -> bool {
-        matches!(self, Self::GeneralLive | Self::ExtendedThinking)
-    }
-}
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ThinkingLevel { #[default] Low, Medium, High }
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum TranscriptionMode { #[default] Verbatim, Smart }
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeminiOptions {

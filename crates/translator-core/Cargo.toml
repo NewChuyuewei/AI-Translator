@@ -1,0 +1,18 @@
+[package]
+name = "translator-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file = "../../COPYRIGHT"
+repository.workspace = true
+description = "UI-independent domain model for Gemini Live Translator"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

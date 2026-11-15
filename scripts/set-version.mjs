@@ -33,6 +33,7 @@ replace('android/app/build.gradle.kts', /(versionCode\s*=\s*)\d+/, `$1${versionC
 replace('android/app/build.gradle.kts', /(versionName\s*=\s*")[^"]+(")/, `$1${version}$2`, 'native Android versionName');
 // Git may check text files out as CRLF on Windows runners. Match logical line
 // boundaries rather than assuming LF so custom releases are platform-neutral.
+replace('Cargo.toml', /(\[workspace\.package\][\s\S]*?[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'workspace package version');
 replace('src-tauri/Cargo.toml', /(\[package\][\s\S]*?[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo package version');
 replace('src-tauri/Cargo.lock', /(\[\[package\]\][\r\n]+name\s*=\s*"gemini-live-translator"[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo lock application version');
 replace('packaging/windows-installer.nsi', /!define PRODUCT_VERSION "[^"]+"/, `!define PRODUCT_VERSION "${version}"`, 'NSIS product version');

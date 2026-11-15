@@ -23,6 +23,8 @@ Audited on 2026-11-14. The project follows the latest **stable** releases where 
 
 ## Approved desktop migration
 
+The v2.1.0 migration workspace targets the latest stable toolchain verified on 2026-11-14: Rust 1.100.0, edition 2024, and Slint 1.18.1. Versions are pinned in `rust-toolchain.toml` and the workspace manifests so CI and developer builds agree; dependency updates still require tests rather than floating production builds.
+
 The active desktop baseline remains Tauri 2 until the replacement passes feature parity and target-device gates. The approved sequence is Rust + Slint in v2.1.0, allocation-free callbacks/SPSC transport in v2.2.0, native low-latency platform backends in v2.3.0, clocked mixing in v2.4.0, adaptive VAD in v2.5.0, 10 ms internal frames in v2.6.0, and production hardening in v3.0.0. See [`PC_RUST_SLINT_ROADMAP.md`](PC_RUST_SLINT_ROADMAP.md). No version is advanced merely by adding dependencies or compiling a prototype.
 
 ## Intentionally deferred breaking upgrades
