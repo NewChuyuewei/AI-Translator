@@ -110,15 +110,15 @@ impl Redactor {
             secrets: Vec::new(),
         };
         value.add_secret(api_key.trim());
-        if let Ok(url) = Url::parse(proxy_url) {
-            if !url.username().is_empty() || url.password().is_some() {
-                value.add_secret(proxy_url.trim());
-                value.add_secret(url.username());
-                value.add_secret(&percent_decode_str(url.username()).decode_utf8_lossy());
-                if let Some(password) = url.password() {
-                    value.add_secret(password);
-                    value.add_secret(&percent_decode_str(password).decode_utf8_lossy());
-                }
+        if let Ok(url) = Url::parse(proxy_url)
+            && (!url.username().is_empty() || url.password().is_some())
+        {
+            value.add_secret(proxy_url.trim());
+            value.add_secret(url.username());
+            value.add_secret(&percent_decode_str(url.username()).decode_utf8_lossy());
+            if let Some(password) = url.password() {
+                value.add_secret(password);
+                value.add_secret(&percent_decode_str(password).decode_utf8_lossy());
             }
         }
         value
