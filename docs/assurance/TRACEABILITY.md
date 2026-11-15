@@ -9,6 +9,7 @@
 | SWR-CORE-005 | serde rename/alias 契约 | `swr_core_005_serialized_contract_remains_compatible_with_existing_settings`、核心契约测试 |
 | SWR-UI-001 | `desktop-slint/src/main.rs` 的适配器未接入安全拒绝路径 | Slint workspace 编译；UI 集成测试待办 `ASSURANCE-UI-001` |
 | SWR-NUI-001 | Slint `thinking-index`/`transcription-index`、设置恢复和活动会话禁用门 | `swr_nui_001_protocol_option_indices_round_trip`、属性绑定代码评审 |
+| SWR-NUI-002 | Windows GUI subsystem、Slint `Palette`/`ScrollView`、会话范围 `caption_visible` 生命周期 | `scripts/check-desktop-ux.mjs`、双平台 native CI；视觉与实际遮挡验收归入 `ASSURANCE-TARGET-001/006/007` |
 | SWR-CFG-001 | `scripts/set-version.mjs`、`scripts/check-version.mjs` | `tests/version_script_test.mjs`、CI version gate |
 | SWR-PROTO-001 | `translator_core::protocol::setup`、`LiveProtocolConfig` | `swr_proto_001_setup_is_model_specific_and_contains_no_credentials`、协议构造测试 |
 | SWR-PROTO-002 | `protocol::setup` 的模型专属分支 | `swr_proto_002_translation_and_transcription_semantics_are_distinct`、协议精确值测试 |

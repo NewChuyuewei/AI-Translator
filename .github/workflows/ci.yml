@@ -35,6 +35,7 @@ jobs:
       - run: node tests/version_script_test.mjs
       - run: node scripts/check-assurance.mjs
       - run: node scripts/check-no-legacy-desktop.mjs
+      - run: node scripts/check-desktop-ux.mjs
       - run: node scripts/check-target-evidence.mjs
       - run: node tests/target_evidence_test.mjs
       - name: Verify native Rust lockfile
@@ -90,6 +91,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build native Slint release binary
         run: cargo build --release --locked -p translator-desktop
+      - name: Verify Windows GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-windows-gui.ps1 target/release/gemini-live-translator.exe
       - name: Run platform workspace tests
         run: cargo test --workspace --locked
 
