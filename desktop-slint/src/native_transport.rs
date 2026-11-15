@@ -586,8 +586,10 @@ mod tests {
             let Message::Text(audio) = audio else {
                 panic!("expected audio text")
             };
-            let audio: serde_json::Value = serde_json::from_str(&audio).expect("audio frame JSON");
-            assert_eq!(audio["realtimeInput"]["audio"]["data"], "AQIDBA==");
+            assert_eq!(
+                audio.as_str(),
+                r#"{"realtimeInput":{"audio":{"data":"AQIDBA==","mimeType":"audio/pcm;rate=16000"}}}"#
+            );
             socket
                 .send(Message::Text(
                     r#"{"serverContent":{"inputTranscription":{"text":"hello"},"outputTranscription":{"text":"你好"}}}"#.into(),
