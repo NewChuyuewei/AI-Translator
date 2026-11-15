@@ -40,6 +40,10 @@
 | SWR-NCFG-002 | Slint `write_private`、Windows `replace_windows` | `swr_ncfg_002_replacement_does_not_leave_plaintext_or_temp_files`、平台代码评审 |
 | SWR-NCFG-003 | `read_bounded`、Unix 权限分支 | `swr_ncfg_003_unix_files_are_private`、核心超限测试 |
 | SWR-NCFG-004 | Slint 保存/解锁/删除回调和 `Zeroize` | 安全失败代码评审；交互测试待办 `ASSURANCE-UI-002` |
+| SWR-DEV-001 | `devices::AudioDevices::bounded`、`AudioDeviceInfo::bounded` | `swr_dev_001_snapshot_is_bounded_and_control_characters_are_removed` |
+| SWR-DEV-002 | `devices::normalize` | `swr_dev_002_duplicate_ids_and_defaults_are_deterministically_normalized` |
+| SWR-DEV-003 | `AudioDevices::validate_selection` | `swr_dev_003_stale_and_cross_class_selections_are_rejected`、旧 Tauri 枚举回归 |
+| SWR-DEV-004 | `DeviceProvider`、`MemoryDeviceProvider`、Slint `PendingNativeDeviceProvider` | `swr_dev_004_memory_provider_has_deterministic_recovery`、Slint 安全拒绝评审 |
 
 ## 开放验证项
 

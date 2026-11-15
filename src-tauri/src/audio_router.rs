@@ -8,7 +8,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, Instant}};
 use tokio::sync::mpsc;
-pub use translator_core::AudioSourceMode;
+pub use translator_core::{AudioSourceMode, devices::{AudioDeviceInfo, AudioDevices}};
 
 pub const SAMPLE_RATE: u32 = 16_000;
 pub const FRAME_DURATION: Duration = Duration::from_millis(40);
@@ -26,16 +26,6 @@ pub struct AudioConfig {
     pub mode: AudioSourceMode,
     #[serde(default)] pub microphone_device: Option<String>,
     #[serde(default)] pub system_device: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AudioDeviceInfo { pub id: String, pub name: String, pub is_default: bool }
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AudioDevices {
-    pub microphones: Vec<AudioDeviceInfo>, pub system_sources: Vec<AudioDeviceInfo>,
-    pub playback_devices: Vec<AudioDeviceInfo>, pub platform: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -221,7 +211,7 @@ mod desktop {
         let system_sources = vec![AudioDeviceInfo { id: "screen-capture-kit".into(), name: "系统音频 · ScreenCaptureKit".into(), is_default: true }];
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         let system_sources = Vec::new();
-        Ok(AudioDevices { microphones, system_sources, playback_devices, platform: std::env::consts::OS.into() })
+        Ok(AudioDevices::bounded(microphones, system_sources, playback_devices, std::env::consts::OS))
     }
     fn input_device(name: Option<&str>) -> Result<cpal::Device> {
         let host = cpal::default_host();
@@ -286,7 +276,7 @@ mod desktop {
 pub fn list_devices() -> Result<AudioDevices> {
     #[cfg(not(target_os = "android"))] { desktop::devices() }
     #[cfg(target_os = "android")] {
-        Ok(AudioDevices { microphones: vec![], system_sources: vec![], playback_devices: vec![], platform: "android".into() })
+        Ok(AudioDevices::bounded(vec![], vec![], vec![], "android"))
     }
 }
 
