@@ -80,6 +80,7 @@
 | SWR-NAUDIO-003 | `PCM_QUEUE_FRAMES=6`、16 kHz/640 样本/PCM16 | `swr_naudio_002_framer_emits_exact_bounded_pcm_frames` |
 | SWR-NAUDIO-004 | `SilenceGate`、RMS 阈值、25 个 40 ms hangover 帧 | `swr_naudio_004_token_saver_preserves_hangover_and_resumes_on_speech` |
 | SWR-NAUDIO-005 | Windows CPAL/WASAPI render loopback、`AudioMixer` 双源 40 ms 时钟和 160 ms 源缓存 | `swr_naudio_005_mixed_frames_use_bounded_convex_weights`、真机待办 `ASSURANCE-TARGET-005` |
+| SWR-NAUDIO-006 | `macos-system-audio` ScreenCaptureKit 适配器、AudioBufferList 边界、容量 12 `RawEvent` 汇入既有独立重采样/混音路径 | `swr_naudio_006_requires_macos_13_for_system_audio`、`swr_naudio_006_planar_audio_is_bounded_and_interleaved`、`x86_64-apple-darwin` cross-check、真机待办 `ASSURANCE-TARGET-008` |
 | SWR-NPLAY-001 | `NativePlaybackTask`、`playback_required` 双就绪门及失败回滚 | `swr_nport_003_worker_events_map_to_typed_ui_lifecycle`、真机待办 `ASSURANCE-TARGET-004` |
 | SWR-NPLAY-002 | 固定 12 项 `Command` 队列、播放工作线程重采样、CPAL `try_lock` 回调 | `swr_nplay_001_resampler_is_chunk_boundary_independent`、回调代码评审 |
 | SWR-NPLAY-003 | 原子 epoch、`clear`、480 ms 样本上限及 `Zeroize` | `swr_nplay_002_clear_invalidates_queued_audio_immediately`、代码评审 |
@@ -99,3 +100,4 @@
 - `ASSURANCE-TARGET-005`：在 Windows 真机验证 Slint WASAPI loopback 默认/指定 render endpoint、系统音频、麦克风混合、单路欠载、设备失效和停止；完成前不得宣称 Windows 系统采集生产验收。
 - `ASSURANCE-TARGET-006`：在 Windows/macOS 真机验证字幕窗置顶、透明无边框、解锁拖动、锁定禁止拖动，以及鼠标穿透失败时仍可恢复；Linux CI 不能替代窗口管理器验收。
 - `ASSURANCE-TARGET-007`：在 Windows/macOS 真机验证托盘显示/菜单、关闭隐藏、重复启动拒绝、活动会话退出清理及无残留进程；Linux CI 不能替代系统 shell 验收。
+- `ASSURANCE-TARGET-008`：在 macOS 13+ 真机验证 ScreenCaptureKit 权限拒绝/授予、48 kHz 双声道系统音频、混合模式、排除本进程回放、流失效和确定性停止；target cross-check 不能替代 TCC 与设备行为验收。

@@ -27,5 +27,8 @@ tokio-tungstenite.workspace = true
 translator-core = { path = "../crates/translator-core" }
 zeroize.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+macos-system-audio = { path = "../crates/macos-system-audio" }
+
 [build-dependencies]
 slint-build = "1.18.1"

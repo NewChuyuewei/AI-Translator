@@ -288,15 +288,45 @@ fn run_capture(
     stop: &AtomicBool,
     events: &SyncSender<AudioTaskEvent>,
 ) -> Result<()> {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let _ = system_device;
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     if mode.wants_system_audio() {
         return Err(anyhow!(
             "此平台的 Slint 原生系统音频尚未完成验证；未打开任何音频设备"
         ));
     }
     let (raw_sender, raw_receiver) = mpsc::sync_channel(RAW_QUEUE_CHUNKS);
+    #[cfg(target_os = "macos")]
+    let mac_capture_failed = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "macos")]
+    let mac_system_capture = if mode.wants_system_audio() {
+        if system_device
+            .filter(|value| !value.is_empty())
+            .is_some_and(|value| value != "screen-capture-kit")
+        {
+            return Err(anyhow!("所选 ScreenCaptureKit 系统音频源已不可用"));
+        }
+        Some(macos_system_audio::MacSystemCapture::start({
+            let raw_sender = raw_sender.clone();
+            let capture_failed = Arc::clone(&mac_capture_failed);
+            move |event| match event {
+                macos_system_audio::CaptureEvent::Data(chunk) => {
+                    let _ = raw_sender.try_send(RawEvent::Data(RawChunk {
+                        source: CaptureSource::System,
+                        sample_rate: chunk.sample_rate,
+                        channels: chunk.channels,
+                        samples: chunk.samples,
+                    }));
+                }
+                macos_system_audio::CaptureEvent::Failed => {
+                    capture_failed.store(true, Ordering::Release);
+                }
+            }
+        })?)
+    } else {
+        None
+    };
     let mut streams = Vec::new();
     if mode.wants_microphone() {
         let device = input_device(microphone_device)?;
@@ -332,6 +362,10 @@ fn run_capture(
     let mut mixer = AudioMixer::new(mode, token_saver);
     let mut next_frame = Instant::now() + FRAME_DURATION;
     while !stop.load(Ordering::Acquire) {
+        #[cfg(target_os = "macos")]
+        if mac_capture_failed.load(Ordering::Acquire) {
+            return Err(anyhow!("ScreenCaptureKit 系统音频流已停止或返回无效格式"));
+        }
         let wait = next_frame
             .saturating_duration_since(Instant::now())
             .min(Duration::from_millis(20));
@@ -352,6 +386,8 @@ fn run_capture(
         }
     }
     drop(streams);
+    #[cfg(target_os = "macos")]
+    drop(mac_system_capture);
     let _ = events.try_send(AudioTaskEvent::Stopped);
     Ok(())
 }

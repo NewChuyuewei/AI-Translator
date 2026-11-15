@@ -1,0 +1,21 @@
+[package]
+name = "macos-system-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file = "../../COPYRIGHT"
+repository.workspace = true
+description = "Bounded ScreenCaptureKit system-audio adapter"
+
+[dependencies]
+anyhow.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+dispatch2 = "0.3.1"
+objc2 = "0.6.5"
+objc2-core-audio-types = "0.3.2"
+objc2-core-media = { version = "0.3.2", features = ["CMSampleBuffer", "CMBlockBuffer", "CMSync", "objc2-core-audio-types"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSError", "NSProcessInfo"] }
+objc2-screen-capture-kit = { version = "0.3.2", features = ["SCStream", "SCShareableContent"] }

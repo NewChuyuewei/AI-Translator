@@ -82,6 +82,7 @@
 | SWR-NAUDIO-003 | PCM 输出队列必须固定为 6 个 40 ms 帧；过载不得阻塞采集，输出帧必须为 16 kHz 单声道、每帧 640 样本/1280 字节。 | 精确 PCM 分帧测试、容量代码评审 |
 | SWR-NAUDIO-004 | Token saver 启用时必须基于 40 ms 帧 RMS 抑制持续近静音，并保留 1 秒 hangover；检测到语音必须立即恢复且重置 hangover，关闭时不得抑制任何帧。 | 静音、hangover、恢复及关闭模式单元测试 |
 | SWR-NAUDIO-005 | Windows 系统音频必须从所选或默认 render endpoint 以 WASAPI loopback 采集；混合模式须将麦克风和系统音频各以 0.5 权重合成到同一 40 ms 时钟，单路欠载以静音补齐，任一路缓存不得超过 160 ms。 | 确定性混音测试、Windows 适配代码评审及真机待办 |
+| SWR-NAUDIO-006 | macOS 系统音频必须使用 ScreenCaptureKit 的音频输出，以 48 kHz 双声道 Float32 有界复制到既有 12 项原始队列；必须排除本进程音频，拒绝损坏或超限 AudioBufferList，并复用独立重采样和 40 ms 混音时钟。权限、启动或流停止失败必须取消会话且不得进入虚假 Running。 | 平面音频边界测试、macOS target cross-check、真机待办 |
 | SWR-NPLAY-001 | 启用译音时，原生会话必须在 setupComplete 后异步打开所选或默认播放设备；麦克风和播放设备均就绪后才可进入 Running，任一失败必须取消其余资源。 | 双就绪状态测试、生命周期代码评审 |
 | SWR-NPLAY-002 | Gemini 24 kHz PCM16 必须在固定 12 项命令队列的工作线程中解码和有状态重采样；CPAL 输出回调只能非阻塞读取有界样本队列并复制到设备缓冲。 | 重采样分块一致性测试、回调代码评审 |
 | SWR-NPLAY-003 | 服务端 interrupted 或停止必须立即递增播放 epoch 并清空设备侧队列；陈旧命令必须清零丢弃，设备侧排队不得超过 480 ms。 | 中断清空测试、容量与清零代码评审 |

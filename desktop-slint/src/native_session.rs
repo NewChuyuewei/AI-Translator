@@ -285,7 +285,7 @@ impl SessionPort for NativeSessionPort {
         if self.status.phase.is_active() || self.task.is_some() {
             return Err(anyhow!("原生会话已在运行或停止中"));
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         if options.mode != AudioSourceMode::MicrophoneOnly {
             return Err(anyhow!(
                 "此平台的 Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
@@ -404,7 +404,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     #[test]
     fn swr_nport_001_unverified_audio_modes_remain_fail_closed() {
         let mut port = NativeSessionPort::default();
