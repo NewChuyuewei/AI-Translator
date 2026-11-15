@@ -1,4 +1,6 @@
-#![forbid(unsafe_code)]
+// Slint's generated module contains its own narrowly scoped unsafe allowance.
+// `deny` keeps handwritten code safe while allowing that audited dependency boundary.
+#![deny(unsafe_code)]
 
 slint::include_modules!();
 

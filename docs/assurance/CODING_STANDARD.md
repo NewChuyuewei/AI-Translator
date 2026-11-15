@@ -14,7 +14,7 @@
 
 ## 2. Rust 规则
 
-- 新的核心 crate 使用 `#![forbid(unsafe_code)]`；必须使用 `unsafe` 的平台 FFI 应隔离到专用 crate，记录不变量并单独评审；
+- 新的纯 Rust 核心 crate 使用 `#![forbid(unsafe_code)]`；Slint 生成代码需要其宏内部的受限 `unsafe` 许可，因此桌面入口使用 `#![deny(unsafe_code)]` 约束手写代码并把生成模块视为单独依赖边界；必须使用 `unsafe` 的平台 FFI 应隔离到专用 crate，记录不变量并单独评审；
 - 生产路径禁止 `unwrap()`、`expect()`、未检查数组索引和可触发 panic 的输入假设；
 - `Mutex` 中毒必须采用明确恢复或故障策略，不能静默忽略状态损坏；
 - 状态迁移使用总是可审查的状态机；无效迁移返回错误且不得部分修改状态；
