@@ -69,7 +69,14 @@ jobs:
           rustup target add x86_64-pc-windows-gnu x86_64-apple-darwin
           cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-pc-windows-gnu
           cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-apple-darwin
-          cargo check --locked -p translator-desktop --target x86_64-apple-darwin
+          if cargo check --locked -p translator-desktop --target x86_64-apple-darwin >mac-check.log 2>&1; then exit 0; fi
+          cat mac-check.log
+          details="$(tail -c 12000 mac-check.log)"
+          details="${details//'%'/'%25'}"
+          details="${details//$'\r'/'%0D'}"
+          details="${details//$'\n'/'%0A'}"
+          echo "::error title=macOS desktop cross-check failed::${details}"
+          exit 1
       - name: Test Rust workspace and compile Slint desktop
         run: |
           if cargo test --workspace --all-targets --locked >workspace-test.log 2>&1; then
