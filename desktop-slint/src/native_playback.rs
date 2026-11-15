@@ -188,7 +188,7 @@ fn run_playback(
             channels,
             Arc::clone(&samples),
             Arc::clone(&failed),
-            |sample| f64::from(sample),
+            f64::from,
             0.0,
         )?,
         SampleFormat::I16 => build_output::<i16>(
@@ -253,8 +253,10 @@ fn run_playback(
                     active_epoch = command_epoch;
                 }
                 let mut input: Vec<f32> = bytes
-                    .chunks_exact(2)
-                    .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|chunk| i16::from_le_bytes(*chunk) as f32 / 32768.0)
                     .collect();
                 bytes.zeroize();
                 let output = resampler.push(&input);
