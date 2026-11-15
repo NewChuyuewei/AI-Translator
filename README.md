@@ -97,7 +97,9 @@ flowchart LR
 ```text
 android/                         原生 Kotlin + Compose Android 应用
   app/src/main/java/...          会话、网络、音频、Keystore 与 UI
-src/                             桌面控制面板与字幕窗前端
+crates/translator-core/          无 UI 的共享会话契约、状态与输入校验
+desktop-slint/                   v2.1.0 原生 Slint 控制窗/字幕窗迁移壳层
+src/                             当前生产桌面控制面板与字幕窗前端
 src-tauri/src/
   lib.rs                         会话生命周期、IPC、配置与字幕状态
   gemini_client.rs               Gemini Live WebSocket 协议与 TLS
@@ -115,7 +117,16 @@ docs/                            技术栈与 Android 迁移文档
 
 ### 桌面端
 
-需要 Node.js `^22.22.2` 或 `>=24.15.0`、Rust stable，以及对应平台的 [Tauri 2 前置依赖](https://v2.tauri.app/start/prerequisites/)。
+v2.1.0 迁移目标固定使用 Rust 1.100.0、edition 2024 与 Slint 1.18.1。当前生产入口仍是 Tauri；Slint 壳层尚未接入会话和设备，不能替代生产入口或用于宣称 v2.1.0 已完成。
+
+验证并运行迁移壳层：
+
+```bash
+cargo test --workspace --all-targets --locked
+cargo run -p translator-desktop --locked
+```
+
+当前生产入口还需要 Node.js `^22.22.2` 或 `>=24.15.0`、Rust 以及对应平台的 [Tauri 2 前置依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
 npm ci
@@ -157,6 +168,7 @@ npm run build
 npm run test:ui
 npm run test:version
 npm run test:android-config
+cargo test --workspace --all-targets --locked
 cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 gradle -p android testDebugUnitTest assembleDebug
 ```

@@ -1,0 +1,21 @@
+[package]
+name = "translator-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file = "../COPYRIGHT"
+repository.workspace = true
+description = "Native Slint desktop shell for Gemini Live Translator"
+build = "build.rs"
+
+[[bin]]
+name = "gemini-live-translator"
+path = "src/main.rs"
+
+[dependencies]
+slint.workspace = true
+translator-core = { path = "../crates/translator-core" }
+
+[build-dependencies]
+slint-build = "1.18.1"

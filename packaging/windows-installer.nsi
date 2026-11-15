@@ -16,7 +16,7 @@ RequestExecutionLevel user
 !endif
 
 !define PRODUCT_NAME "Gemini Live Translator"
-!define PRODUCT_VERSION "1.0.0"
+!define PRODUCT_VERSION "1.1.0"
 !define PRODUCT_PUBLISHER "chuyuewei"
 !define PRODUCT_COPYRIGHT "Copyright © 2026 chuyuewei. All rights reserved."
 !define APP_EXE "Gemini-Live-Translator.exe"

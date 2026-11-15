@@ -1,6 +1,6 @@
 [package]
 name = "gemini-live-translator"
-version = "1.0.0"
+version = "1.1.0"
 description = "Gemini Live real-time voice translation"
 authors = ["chuyuewei"]
 license-file = "../COPYRIGHT"
@@ -34,6 +34,7 @@ percent-encoding = "2.3.2"
 cpal = "0.15.3"
 crossbeam-channel = "0.5.17"
 zeroize = "1.9.1"
+translator-core = { path = "../crates/translator-core" }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Desktop OS proxy settings, bypass rules and PAC/WPAD resolution.

@@ -3,19 +3,16 @@
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use percent_encoding::percent_decode_str;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{net::IpAddr, time::Duration};
 use tauri::AppHandle;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::watch};
 use url::{Host, Url};
+pub use translator_core::ProxyMode;
 
 // PAC/ProxySelector expect the HTTPS form of the actual WebSocket destination;
 // no API key or other secret is included in the URL supplied to the resolver.
 pub const PROXY_TARGET: &str = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
-
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProxyMode { #[default] Auto, Manual, Direct }
 
 #[derive(Clone)]
 struct Credentials { username: Vec<u8>, password: Vec<u8> }

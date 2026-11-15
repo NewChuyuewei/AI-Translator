@@ -1,6 +1,7 @@
 # PC 端 Rust + Slint 与低延迟音频路线图
 
-状态：**已批准的实施计划，尚未开始迁移**  
+状态：**v2.1.0 实施中（核心契约提取与 Slint 原生壳层阶段；尚未达到版本验收门）**
+
 制定日期：2026-11-14  
 目标平台：Windows 10/11 x64、macOS 13+ Apple Silicon；Linux 继续作为开发与 CI 辅助平台。Android 保持独立 Kotlin + Compose 架构。
 
@@ -105,6 +106,14 @@ Cargo workspace
 - Android 不链接这些桌面 crate，不因桌面迁移重新引入 Rust/JNI。
 
 ## 4. v2.1.0 — Rust + Slint 桌面迁移
+
+### 4.0 当前实施进度
+
+- 已建立 Rust 1.100 / edition 2024 Cargo workspace，并采用 Slint 1.18.1；版本来自 2026-11-14 后最新稳定发布检查；
+- 已提取首个无 UI 的 `translator-core` 契约层，旧 Tauri 适配器与新 Slint 壳层共同使用模型、会话选项、代理模式、音源模式、状态和输入校验；
+- 已建立可编译的 Slint 控制窗与独立字幕窗迁移壳层，但会话、设备、保险库、托盘、快捷键及平台窗口能力仍未接入，壳层会明确拒绝开始采集；
+- 已增加跨 npm、Cargo workspace、旧 Tauri、原生 Android 和 Windows 包装的版本一致性门，并把历史基线统一为 `1.1.0`；这不是推进到 v2.1.0；
+- 旧 Tauri 仍是生产入口，待 Slint 功能对等和真机门通过后才能删除。
 
 ### 4.1 实施顺序
 

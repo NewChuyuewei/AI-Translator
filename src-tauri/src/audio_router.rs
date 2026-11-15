@@ -8,6 +8,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, Instant}};
 use tokio::sync::mpsc;
+pub use translator_core::AudioSourceMode;
 
 pub const SAMPLE_RATE: u32 = 16_000;
 pub const FRAME_DURATION: Duration = Duration::from_millis(40);
@@ -17,15 +18,6 @@ pub const FRAME_SAMPLES: usize = 640;
 const MAX_BUFFERED_SAMPLES: usize = FRAME_SAMPLES * 4;
 const SILENCE_RMS_THRESHOLD: f32 = 0.003;
 const SILENCE_HANGOVER_FRAMES: u16 = 25; // 1 s preserves server VAD turn endings
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AudioSourceMode { MicrophoneOnly, SystemAudioOnly, Mixed }
-#[cfg(not(target_os = "android"))]
-impl AudioSourceMode {
-    fn wants_mic(self) -> bool { matches!(self, Self::MicrophoneOnly | Self::Mixed) }
-    fn wants_system(self) -> bool { matches!(self, Self::SystemAudioOnly | Self::Mixed) }
-}
 
 #[cfg(not(target_os = "android"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,12 +266,12 @@ mod desktop {
     }
     pub fn open_streams(config: &AudioConfig, raw: &Sender<RawAudio>, errors: &mpsc::Sender<String>) -> Result<Streams> {
         let mut streams = Vec::new();
-        if config.mode.wants_mic() {
+        if config.mode.wants_microphone() {
             streams.push(open_cpal(input_device(config.microphone_device.as_deref())?, false, Source::Mic, raw.clone(), errors.clone())?);
         }
         #[cfg(target_os = "macos")]
         let mut mac = None;
-        if config.mode.wants_system() {
+        if config.mode.wants_system_audio() {
             #[cfg(target_os = "windows")]
             streams.push(open_cpal(output_device(config.system_device.as_deref())?, true, Source::System, raw.clone(), errors.clone())?);
             #[cfg(target_os = "macos")]
