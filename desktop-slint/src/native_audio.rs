@@ -21,6 +21,9 @@ use std::{
 use tokio::sync::mpsc as tokio_mpsc;
 use translator_core::{AudioSourceMode, session_port::NoticeText};
 
+#[cfg(target_os = "macos")]
+mod macos_screen_capture;
+
 pub const PCM_SAMPLE_RATE: u32 = 16_000;
 pub const PCM_FRAME_SAMPLES: usize = 640;
 pub const PCM_FRAME_BYTES: usize = PCM_FRAME_SAMPLES * 2;
@@ -288,15 +291,29 @@ fn run_capture(
     stop: &AtomicBool,
     events: &SyncSender<AudioTaskEvent>,
 ) -> Result<()> {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let _ = system_device;
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     if mode.wants_system_audio() {
         return Err(anyhow!(
             "此平台的 Slint 原生系统音频尚未完成验证；未打开任何音频设备"
         ));
     }
     let (raw_sender, raw_receiver) = mpsc::sync_channel(RAW_QUEUE_CHUNKS);
+    #[cfg(target_os = "macos")]
+    let mac_system_capture = if mode.wants_system_audio() {
+        if system_device
+            .filter(|value| !value.is_empty())
+            .is_some_and(|value| value != "screen-capture-kit")
+        {
+            return Err(anyhow!("所选 ScreenCaptureKit 系统音频源已不可用"));
+        }
+        Some(macos_screen_capture::MacSystemCapture::start(
+            raw_sender.clone(),
+        )?)
+    } else {
+        None
+    };
     let mut streams = Vec::new();
     if mode.wants_microphone() {
         let device = input_device(microphone_device)?;
@@ -352,6 +369,8 @@ fn run_capture(
         }
     }
     drop(streams);
+    #[cfg(target_os = "macos")]
+    drop(mac_system_capture);
     let _ = events.try_send(AudioTaskEvent::Stopped);
     Ok(())
 }

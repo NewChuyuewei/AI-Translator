@@ -1,0 +1,16 @@
+name: Temporary lockfile generation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo generate-lockfile
+      - uses: actions/upload-artifact@v6
+        with:
+          name: generated-lockfile
+          path: Cargo.lock
