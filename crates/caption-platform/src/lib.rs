@@ -72,10 +72,16 @@ fn apply(handle: RawWindowHandle, enabled: bool) -> Result<(), CaptionPlatformEr
     const GWL_EXSTYLE: i32 = -20;
     const WS_EX_TRANSPARENT: isize = 0x0000_0020;
 
+    #[link(name = "user32")]
     #[allow(non_snake_case)]
     unsafe extern "system" {
         fn GetWindowLongPtrW(window: *mut c_void, index: i32) -> isize;
         fn SetWindowLongPtrW(window: *mut c_void, index: i32, value: isize) -> isize;
+    }
+
+    #[link(name = "kernel32")]
+    #[allow(non_snake_case)]
+    unsafe extern "system" {
         fn GetLastError() -> u32;
         fn SetLastError(error: u32);
     }
@@ -115,6 +121,7 @@ fn apply(handle: RawWindowHandle, enabled: bool) -> Result<(), CaptionPlatformEr
 fn apply(handle: RawWindowHandle, enabled: bool) -> Result<(), CaptionPlatformError> {
     use std::ffi::{c_char, c_void};
 
+    #[link(name = "objc")]
     #[allow(non_snake_case)]
     unsafe extern "C" {
         fn sel_registerName(name: *const c_char) -> *mut c_void;
