@@ -50,6 +50,10 @@
 | SWR-PXY-002 | `ProxyCredentials`、`parse_credentials`、`Drop` | `swr_pxy_002_credentials_are_decoded_bounded_and_never_echoed`、代码评审 |
 | SWR-PXY-003 | `ProxyEndpoint::parse` 安全错误映射 | `swr_pxy_003_structure_and_credential_limits_are_enforced`、旧代理脱敏测试 |
 | SWR-PXY-004 | `ProxyEndpoint::safe_label`、核心无运行时边界 | `swr_pxy_004_labels_are_fixed_and_credential_free`、依赖评审 |
+| SWR-TUN-001 | `proxy_handshake::http_connect_request`、`SensitiveBytes` | `swr_tun_001_http_request_is_exact_and_bounded`、旧 HTTP 隧道测试 |
+| SWR-TUN-002 | `parse_http_connect_response`、`MAX_HTTP_CONNECT_HEADER_BYTES` | `swr_tun_002_http_response_is_bounded_and_status_allowlisted` |
+| SWR-TUN-003 | SOCKS greeting/method/auth/connect 纯函数 | `swr_tun_003_socks_auth_and_remote_dns_are_exact`、旧 SOCKS5 远端 DNS 测试 |
+| SWR-TUN-004 | `parse_socks_reply_prefix`、`socks_reply_tail_len` | `swr_tun_004_socks_reply_shapes_are_deterministic`、旧 IPv6 响应测试 |
 
 ## 开放验证项
 

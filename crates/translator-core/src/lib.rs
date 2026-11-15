@@ -12,6 +12,7 @@ pub mod devices;
 pub mod diagnostics;
 pub mod protocol;
 pub mod proxy;
+pub mod proxy_handshake;
 pub mod server_protocol;
 pub mod session_driver;
 pub mod session_port;
