@@ -35,6 +35,7 @@ jobs:
       - run: node tests/version_script_test.mjs
       - run: node scripts/check-assurance.mjs
       - run: node scripts/check-no-legacy-desktop.mjs
+      - run: node scripts/check-desktop-ux.mjs
       - run: node scripts/check-target-evidence.mjs
       - run: node tests/target_evidence_test.mjs
       - name: Verify native Rust lockfile

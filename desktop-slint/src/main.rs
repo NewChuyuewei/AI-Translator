@@ -1,3 +1,6 @@
+// Native Windows GUI builds must not allocate a console window. Packaging and
+// diagnostics remain available through the bounded in-app diagnostic store.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 // Slint's generated module contains its own narrowly scoped unsafe allowance.
 // `deny` keeps handwritten code safe while allowing that audited dependency boundary.
 #![deny(unsafe_code)]
@@ -21,7 +24,7 @@ use native_diagnostics::NativeDiagnostics;
 use native_session::NativeSessionPort;
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::Rc,
     sync::{
         Arc,
@@ -287,9 +290,11 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let control = ControlWindow::new()?;
+    control.set_build_version(env!("CARGO_PKG_VERSION").into());
     let caption = CaptionWindow::new()?;
     let tray = AppTray::new()?;
-    caption.show()?;
+    // The caption is session-scoped. Keeping it hidden at startup prevents an
+    // always-on-top surface from obscuring configuration or unrelated apps.
     tray.show()?;
 
     let config = match ConfigStore::discover() {
@@ -314,6 +319,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let session = Rc::new(RefCell::new(NativeSessionPort::default()));
     let caption_input = Rc::new(RefCell::new(MousePassthrough::default()));
+    let caption_visible = Rc::new(Cell::new(false));
     let diagnostics = Rc::new(RefCell::new(NativeDiagnostics::default()));
     let global_hotkey = match GlobalHotkey::register_f8() {
         Ok(hotkey) => Some(hotkey),
@@ -340,11 +346,15 @@ fn main() -> Result<(), slint::PlatformError> {
     let callback_session = Rc::clone(&session);
     let callback_devices = Rc::clone(&devices);
     let callback_diagnostics = Rc::clone(&diagnostics);
+    let callback_caption = caption.as_weak();
+    let callback_caption_input = Rc::clone(&caption_input);
+    let callback_caption_visible = Rc::clone(&caption_visible);
     control.on_start_stop(move || {
         let Some(ui) = weak.upgrade() else {
             return;
         };
-        let result = if callback_session.borrow().phase().is_active() {
+        let was_active = callback_session.borrow().phase().is_active();
+        let result = if was_active {
             callback_session.borrow_mut().stop()
         } else {
             let options = options_from_ui(&ui, &callback_devices.borrow());
@@ -358,11 +368,51 @@ fn main() -> Result<(), slint::PlatformError> {
                 .validate_selection(&options)
                 .and_then(|()| callback_session.borrow_mut().start(&options))
         };
-        if let Err(error) = result {
-            callback_diagnostics
-                .borrow()
-                .record(LogLevel::Error, &error.to_string());
-            ui.set_status_message(error.to_string().into());
+        match result {
+            Ok(()) if was_active => {
+                if let Some(window) = callback_caption.upgrade() {
+                    let _ = window.hide();
+                }
+                callback_caption_visible.set(false);
+            }
+            Ok(()) => {
+                if let Some(window) = callback_caption.upgrade() {
+                    if let Err(error) = window.show() {
+                        callback_diagnostics
+                            .borrow()
+                            .record(LogLevel::Error, &error.to_string());
+                        ui.set_status_message("字幕窗口无法显示；会话已安全停止".into());
+                        let _ = callback_session.borrow_mut().stop();
+                    } else {
+                        callback_caption_visible.set(true);
+                        window.window().request_redraw();
+                        let lock_window = window.as_weak();
+                        let lock_ui = ui.as_weak();
+                        let lock_input = Rc::clone(&callback_caption_input);
+                        Timer::single_shot(Duration::from_millis(1), move || {
+                            let (Some(window), Some(ui)) =
+                                (lock_window.upgrade(), lock_ui.upgrade())
+                            else {
+                                return;
+                            };
+                            let locked = ui.get_overlay_locked();
+                            if let Err(error) =
+                                apply_caption_lock(&window, &mut lock_input.borrow_mut(), locked)
+                            {
+                                ui.set_status_message(
+                                    format!("字幕窗保持可交互的安全状态：{error}").into(),
+                                );
+                            }
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                callback_diagnostics
+                    .borrow()
+                    .record(LogLevel::Error, &error.to_string());
+                ui.set_status_message(error.to_string().into());
+            }
         }
         apply_diagnostics(&ui, &callback_diagnostics.borrow());
     });
@@ -553,28 +603,25 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    let initial_control = control.as_weak();
-    let initial_caption = caption.as_weak();
-    let initial_input = Rc::clone(&caption_input);
-    Timer::single_shot(Duration::from_millis(1), move || {
-        let (Some(ui), Some(window)) = (initial_control.upgrade(), initial_caption.upgrade())
-        else {
-            return;
-        };
-        let locked = ui.get_overlay_locked();
-        if let Err(error) = apply_caption_lock(&window, &mut initial_input.borrow_mut(), locked) {
-            ui.set_status_message(format!("字幕窗保持可交互的安全状态：{error}").into());
-        }
-    });
-
     let weak = control.as_weak();
     let caption_weak = caption.as_weak();
     let callback_input = Rc::clone(&caption_input);
+    let callback_visible = Rc::clone(&caption_visible);
     control.on_toggle_overlay_lock(move || {
         let (Some(ui), Some(window)) = (weak.upgrade(), caption_weak.upgrade()) else {
             return;
         };
         let requested_lock = !ui.get_overlay_locked();
+        if !callback_visible.get() {
+            window.set_locked(requested_lock);
+            ui.set_overlay_locked(requested_lock);
+            ui.set_status_message(if requested_lock {
+                "字幕窗将在下次会话启动时锁定并启用鼠标穿透。".into()
+            } else {
+                "字幕窗将在下次会话启动时保持可拖动。".into()
+            });
+            return;
+        }
         match apply_caption_lock(&window, &mut callback_input.borrow_mut(), requested_lock) {
             Ok(()) => {
                 ui.set_overlay_locked(requested_lock);
@@ -665,6 +712,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let event_tray = tray.as_weak();
     let event_session = Rc::clone(&session);
     let event_diagnostics = Rc::clone(&diagnostics);
+    let event_caption_visible = Rc::clone(&caption_visible);
     let session_timer = Timer::default();
     session_timer.start(TimerMode::Repeated, Duration::from_millis(25), move || {
         for _ in 0..32 {
@@ -681,6 +729,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     event_diagnostics.borrow().record(level, &status.message);
                     if let Some(tray) = event_tray.upgrade() {
                         tray.set_session_running(status.phase.is_active());
+                    }
+                    if !status.phase.is_active() {
+                        if let Some(window) = event_caption.upgrade() {
+                            let _ = window.hide();
+                        }
+                        event_caption_visible.set(false);
                     }
                     if let Some(ui) = event_control.upgrade() {
                         ui.set_session_running(status.phase.is_active());

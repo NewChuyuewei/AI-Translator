@@ -11,7 +11,7 @@
   "scripts": {
     "test:version": "node scripts/check-version.mjs && node tests/version_script_test.mjs",
     "test:assurance": "node scripts/check-assurance.mjs",
-    "test:desktop-boundary": "node scripts/check-no-legacy-desktop.mjs",
+    "test:desktop-boundary": "node scripts/check-no-legacy-desktop.mjs && node scripts/check-desktop-ux.mjs",
     "test:target-evidence": "node scripts/check-target-evidence.mjs && node tests/target_evidence_test.mjs"
   }
 }

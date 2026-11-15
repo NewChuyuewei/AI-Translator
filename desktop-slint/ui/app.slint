@@ -1,4 +1,4 @@
-import { Button, CheckBox, ComboBox, LineEdit, Slider, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, Slider, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
 export component AppTray inherits SystemTrayIcon {
     icon: @image-url("../assets/tray.png");
@@ -71,10 +71,12 @@ export component CaptionWindow inherits Window {
 }
 
 export component ControlWindow inherits Window {
-    title: "Gemini Live Translator · Slint 迁移预览";
-    width: 620px;
-    height: 980px;
+    title: "Gemini Live Translator";
+    width: 680px;
+    height: 760px;
     background: #f5f7f8;
+
+    init => { Palette.color-scheme = ColorScheme.light; }
 
     in-out property <string> api-key: "";
     in-out property <bool> save-sensitive: false;
@@ -103,7 +105,8 @@ export component ControlWindow inherits Window {
     in-out property <float> overlay-scale: 1.0;
     in-out property <bool> session-running: false;
     in-out property <bool> probe-running: false;
-    in-out property <string> status-message: "Slint 桌面迁移预览 · 尚未连接会话后端";
+    in-out property <string> status-message: "原生桌面已就绪 · 尚未启动会话";
+    in-out property <string> build-version: "1.1.0";
     in-out property <[string]> diagnostic-model: ["尚无诊断记录"];
     in-out property <int> diagnostic-index: 0;
     in-out property <int> diagnostic-count: 0;
@@ -120,9 +123,10 @@ export component ControlWindow inherits Window {
     callback clear-diagnostics();
     callback quit-requested();
 
-    VerticalBox {
-        padding: 24px;
-        spacing: 13px;
+    ScrollView {
+        VerticalBox {
+            padding: 24px;
+            spacing: 13px;
 
         Text { text: "LIVE / TRANSLATOR"; color: #0b6b57; font-size: 14px; font-weight: 700; }
         Text { text: "实时语音翻译与转写."; color: #14242c; font-size: 28px; font-weight: 700; }
@@ -230,11 +234,12 @@ export component ControlWindow inherits Window {
             Button { enabled: !root.session-running; text: root.probe-running ? "取消网络测试" : "测试网络"; clicked => { root.probe-transport(); } }
             Button { enabled: !root.probe-running; text: root.session-running ? "停止" : "验证并开始"; primary: true; clicked => { root.start-stop(); } }
         }
-        Text {
-            text: "v1.1.0 migration build · Rust 1.100 · Slint 1.18.1";
-            color: #718087;
-            horizontal-alignment: center;
-            font-size: 11px;
+            Text {
+                text: "v" + root.build-version + " · 原生 Rust + Slint 桌面";
+                color: #718087;
+                horizontal-alignment: center;
+                font-size: 11px;
+            }
         }
     }
 }
