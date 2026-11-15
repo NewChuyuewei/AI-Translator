@@ -243,9 +243,8 @@ fn extract_audio(sample_buffer: &CMSampleBuffer) -> Option<RawChunk> {
         let mut interleaved = Vec::with_capacity(frames * count);
         for frame in 0..frames {
             for buffer in buffers {
-                let plane = unsafe {
-                    std::slice::from_raw_parts(buffer.mData.cast::<f32>(), frames)
-                };
+                let plane =
+                    unsafe { std::slice::from_raw_parts(buffer.mData.cast::<f32>(), frames) };
                 interleaved.push(plane[frame]);
             }
         }
@@ -262,16 +261,18 @@ fn extract_audio(sample_buffer: &CMSampleBuffer) -> Option<RawChunk> {
 fn shareable_content() -> Result<Retained<SCShareableContent>> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let sender = Mutex::new(Some(sender));
-    let handler = RcBlock::new(move |content: *mut SCShareableContent, _error: *mut NSError| {
-        let result = unsafe { Retained::retain(content) }.map(SendObject);
-        if let Some(sender) = sender
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take()
-        {
-            let _ = sender.send(result);
-        }
-    });
+    let handler = RcBlock::new(
+        move |content: *mut SCShareableContent, _error: *mut NSError| {
+            let result = unsafe { Retained::retain(content) }.map(SendObject);
+            if let Some(sender) = sender
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+            {
+                let _ = sender.send(result);
+            }
+        },
+    );
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
     receiver
         .recv_timeout(START_TIMEOUT)

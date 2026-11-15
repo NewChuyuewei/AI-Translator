@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -42,14 +42,6 @@ jobs:
       - run: npm run test:version
       - run: npm run test:android-config
       - run: npm run test:assurance
-      - name: TEMP generate and push native Rust lockfile
-        run: |
-          cargo generate-lockfile
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add Cargo.lock
-          git diff --cached --quiet || git commit -m "chore: update generated lockfile"
-          git push origin HEAD:${GITHUB_REF_NAME}
       - name: Verify native Rust lockfile
         run: cargo metadata --locked --no-deps --format-version 1 >/dev/null
       - name: Verify native Rust formatting
@@ -77,6 +69,7 @@ jobs:
           rustup target add x86_64-pc-windows-gnu x86_64-apple-darwin
           cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-pc-windows-gnu
           cargo check --locked -p caption-platform -p desktop-lifecycle --target x86_64-apple-darwin
+          cargo check --locked -p translator-desktop --target x86_64-apple-darwin
       - name: Test Rust workspace and compile Slint desktop
         run: |
           if cargo test --workspace --all-targets --locked >workspace-test.log 2>&1; then
