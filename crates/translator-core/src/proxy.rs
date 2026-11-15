@@ -1,6 +1,6 @@
 //! Credential-safe proxy endpoint parsing independent of transport and platform resolution.
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use percent_encoding::percent_decode_str;
 use url::{Host, Url};
 use zeroize::Zeroize;
@@ -30,6 +30,72 @@ pub struct ProxyEndpoint {
     pub host: String,
     pub port: u16,
     pub credentials: Option<ProxyCredentials>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProxyDestination {
+    Direct,
+    Proxy(ProxyEndpoint),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProxyRoute {
+    pub destination: ProxyDestination,
+    label: &'static str,
+}
+
+impl ProxyRoute {
+    pub fn explicit_direct() -> Self {
+        Self {
+            destination: ProxyDestination::Direct,
+            label: "系统网络（不使用显式代理；仍可能经过 VPN）",
+        }
+    }
+
+    pub fn automatic_direct() -> Self {
+        Self {
+            destination: ProxyDestination::Direct,
+            label: "系统网络（未检测到显式代理；可能经过 VPN）",
+        }
+    }
+
+    pub fn manual(value: &str) -> Result<Self> {
+        Ok(Self::via(ProxyEndpoint::parse(value)?, false))
+    }
+
+    /// Direct/manual modes resolve immediately. Auto requires exactly one
+    /// platform-selected value and therefore returns `None` here.
+    pub fn immediate(mode: crate::ProxyMode, address: &str) -> Result<Option<Self>> {
+        match mode {
+            crate::ProxyMode::Direct => Ok(Some(Self::explicit_direct())),
+            crate::ProxyMode::Manual => Self::manual(address).map(Some),
+            crate::ProxyMode::Auto => Ok(None),
+        }
+    }
+
+    /// Parse the single route selected by a platform resolver. Callers must
+    /// not silently try later DIRECT entries after a selected proxy fails.
+    pub fn automatic_resolver_value(value: &str) -> Result<Self> {
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("direct://") || value.eq_ignore_ascii_case("direct:///") {
+            return Ok(Self::automatic_direct());
+        }
+        let endpoint =
+            ProxyEndpoint::parse(value).context("系统代理类型或地址无法使用；请尝试手动代理")?;
+        Ok(Self::via(endpoint, true))
+    }
+
+    pub fn via(endpoint: ProxyEndpoint, automatic: bool) -> Self {
+        let label = endpoint.safe_label(automatic);
+        Self {
+            destination: ProxyDestination::Proxy(endpoint),
+            label,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        self.label
+    }
 }
 
 impl ProxyEndpoint {
@@ -171,5 +237,52 @@ mod tests {
             ProxyEndpoint::parse("http://alice:secret@localhost:8080").expect("label fixture");
         assert_eq!(endpoint.safe_label(false), "手动 HTTP 代理");
         assert_eq!(endpoint.safe_label(true), "系统/环境 HTTP 代理");
+    }
+
+    #[test]
+    fn swr_route_001_direct_and_manual_modes_resolve_without_platform_access() {
+        let direct = ProxyRoute::immediate(crate::ProxyMode::Direct, "ignored")
+            .expect("direct route")
+            .expect("immediate route");
+        assert_eq!(direct.destination, ProxyDestination::Direct);
+        let manual = ProxyRoute::immediate(
+            crate::ProxyMode::Manual,
+            "socks5://alice:secret@localhost:1080",
+        )
+        .expect("manual route")
+        .expect("immediate route");
+        assert!(matches!(manual.destination, ProxyDestination::Proxy(_)));
+        assert!(!manual.label().contains("alice"));
+        assert!(!manual.label().contains("secret"));
+    }
+
+    #[test]
+    fn swr_route_002_auto_requires_one_platform_selected_value() {
+        assert!(
+            ProxyRoute::immediate(crate::ProxyMode::Auto, "ignored")
+                .expect("auto dispatch")
+                .is_none()
+        );
+        assert_eq!(
+            ProxyRoute::automatic_resolver_value("direct://")
+                .expect("auto direct")
+                .destination,
+            ProxyDestination::Direct
+        );
+        let proxy =
+            ProxyRoute::automatic_resolver_value("http://localhost:7890").expect("auto proxy");
+        assert!(matches!(proxy.destination, ProxyDestination::Proxy(_)));
+    }
+
+    #[test]
+    fn swr_route_003_invalid_auto_value_has_fixed_context_without_secrets() {
+        let error =
+            ProxyRoute::automatic_resolver_value("https://alice:secret@proxy.example:443/private")
+                .expect_err("unsupported resolver value")
+                .to_string();
+        assert!(error.contains("系统代理类型或地址无法使用"));
+        assert!(!error.contains("alice"));
+        assert!(!error.contains("secret"));
+        assert!(!error.contains("proxy.example"));
     }
 }
