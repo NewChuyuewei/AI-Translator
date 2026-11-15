@@ -151,7 +151,7 @@ export component ControlWindow inherits Window {
             spacing: 12px;
             Button { text: "退出"; clicked => { root.quit-requested(); } }
             Rectangle { horizontal-stretch: 1; }
-            Button { enabled: !root.probe-running; text: root.probe-running ? "连接验证中…" : "测试网络"; clicked => { root.probe-transport(); } }
+            Button { text: root.probe-running ? "取消网络测试" : "测试网络"; clicked => { root.probe-transport(); } }
             Button { text: root.session-running ? "停止" : "验证并开始"; primary: true; clicked => { root.start-stop(); } }
         }
         Text {

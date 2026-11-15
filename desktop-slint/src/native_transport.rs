@@ -3,7 +3,14 @@
 
 use anyhow::{Context, Result, anyhow};
 use futures_util::{SinkExt, StreamExt};
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -37,20 +44,44 @@ pub struct ProbeReport {
     pub elapsed_ms: u128,
 }
 
-pub fn probe_blocking(options: SessionOptions) -> Result<ProbeReport> {
+pub type ProbeCancel = Arc<AtomicBool>;
+
+pub fn probe_blocking(options: SessionOptions, cancel: ProbeCancel) -> Result<ProbeReport> {
     options.validate()?;
-    let route = resolve_route(options.proxy_mode, &options.proxy_url)?;
+    let route = resolve_route(options.proxy_mode, &options.proxy_url, &cancel)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("无法启动原生网络运行时")?;
-    runtime.block_on(probe_endpoint(options, route, ENDPOINT))
+    runtime.block_on(probe_endpoint(options, route, ENDPOINT, cancel))
 }
 
-fn resolve_route(mode: ProxyMode, address: &str) -> Result<ProxyRoute> {
+fn resolve_route(mode: ProxyMode, address: &str, cancel: &ProbeCancel) -> Result<ProxyRoute> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(anyhow!("网络验证已取消"));
+    }
     if let Some(route) = ProxyRoute::immediate(mode, address)? {
         return Ok(route);
     }
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = sender.send(resolve_automatic_route());
+    });
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return Err(anyhow!("网络验证已取消"));
+        }
+        match receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(anyhow!("系统代理检测任务失败"));
+            }
+        }
+    }
+}
+
+fn resolve_automatic_route() -> Result<ProxyRoute> {
     let mut resolver = proxyres::resolver::Resolver::new();
     resolver
         .get_proxies_for_url(PROXY_TARGET)
@@ -75,6 +106,7 @@ async fn probe_endpoint(
     options: SessionOptions,
     route: ProxyRoute,
     endpoint: &str,
+    cancel: ProbeCancel,
 ) -> Result<ProbeReport> {
     let started = Instant::now();
     let mut request = endpoint
@@ -106,9 +138,12 @@ async fn probe_endpoint(
                 )
             })
     };
-    let (mut socket, _) = tokio::time::timeout(Duration::from_secs(25), handshake)
-        .await
-        .map_err(|_| anyhow!("连接 Gemini 超时；请检查网络和代理"))??;
+    let (mut socket, _) = tokio::select! {
+        result = tokio::time::timeout(Duration::from_secs(25), handshake) => {
+            result.map_err(|_| anyhow!("连接 Gemini 超时；请检查网络和代理"))??
+        }
+        () = cancelled(&cancel) => return Err(anyhow!("网络验证已取消")),
+    };
 
     let config = LiveProtocolConfig {
         model: options.model,
@@ -120,13 +155,17 @@ async fn probe_endpoint(
     };
     let mut driver = SessionDriver::new(&config);
     let setup = driver.setup_message().to_owned();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        socket.send(Message::Text(setup.into())),
-    )
-    .await
-    .map_err(|_| anyhow!("发送 setup 超时"))?
-    .map_err(|error| anyhow!("发送 setup 失败：{}", describe_ws_error(&error)))?;
+    tokio::select! {
+        result = tokio::time::timeout(
+            Duration::from_secs(10),
+            socket.send(Message::Text(setup.into())),
+        ) => {
+            result
+                .map_err(|_| anyhow!("发送 setup 超时"))?
+                .map_err(|error| anyhow!("发送 setup 失败：{}", describe_ws_error(&error)))?;
+        }
+        () = cancelled(&cancel) => return Err(anyhow!("网络验证已取消")),
+    }
 
     let setup_wait = async {
         while let Some(message) = socket.next().await {
@@ -154,9 +193,12 @@ async fn probe_endpoint(
         }
         Err(anyhow!("Gemini 在 setupComplete 前关闭了连接"))
     };
-    tokio::time::timeout(Duration::from_secs(25), setup_wait)
-        .await
-        .map_err(|_| anyhow!("等待 Gemini setupComplete 超时"))??;
+    tokio::select! {
+        result = tokio::time::timeout(Duration::from_secs(25), setup_wait) => {
+            result.map_err(|_| anyhow!("等待 Gemini setupComplete 超时"))??;
+        }
+        () = cancelled(&cancel) => return Err(anyhow!("网络验证已取消")),
+    }
 
     let end = driver.close()?;
     socket
@@ -168,6 +210,12 @@ async fn probe_endpoint(
         route_label,
         elapsed_ms: started.elapsed().as_millis(),
     })
+}
+
+async fn cancelled(cancel: &ProbeCancel) {
+    while !cancel.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 async fn open_route(route: &ProxyRoute, host: &str, port: u16) -> Result<TcpStream> {
@@ -256,7 +304,7 @@ fn describe_ws_error(error: &WsError) -> String {
 mod tests {
     use super::*;
     use futures_util::{SinkExt, StreamExt};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
     use translator_core::{AudioSourceMode, ModelKind, ThinkingLevel, TranscriptionMode};
 
     fn options() -> SessionOptions {
@@ -339,6 +387,7 @@ mod tests {
             options(),
             ProxyRoute::explicit_direct(),
             &format!("ws://{address}"),
+            Arc::new(AtomicBool::new(false)),
         )
         .await
         .expect("probe fixture");
@@ -354,5 +403,38 @@ mod tests {
                 .as_slice(),
             &["PRIVATE-PROBE-KEY"]
         );
+    }
+
+    #[tokio::test]
+    async fn swr_ntrans_005_setup_wait_is_cancellable() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.expect("accept fixture");
+            let mut socket = tokio_tungstenite::accept_async(tcp)
+                .await
+                .expect("WebSocket fixture");
+            let _ = socket.next().await;
+            let _ = socket.next().await;
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let trigger = Arc::clone(&cancel);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            trigger.store(true, Ordering::Release);
+        });
+        let error = probe_endpoint(
+            options(),
+            ProxyRoute::explicit_direct(),
+            &format!("ws://{address}"),
+            cancel,
+        )
+        .await
+        .expect_err("probe must cancel")
+        .to_string();
+        assert_eq!(error, "网络验证已取消");
+        server.await.expect("server fixture");
     }
 }
