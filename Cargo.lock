@@ -5095,21 +5095,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "translator-desktop"
+name = "macos-system-audio"
 version = "1.1.0"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
- "caption-platform",
- "cpal",
- "desktop-lifecycle",
  "dispatch2",
- "futures-util",
  "objc2 0.6.5",
  "objc2-core-audio-types",
  "objc2-core-media",
  "objc2-foundation 0.3.2",
  "objc2-screen-capture-kit",
+]
+
+[[package]]
+name = "translator-desktop"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "caption-platform",
+ "cpal",
+ "desktop-lifecycle",
+ "futures-util",
+ "macos-system-audio",
  "proxyres",
  "rustls",
  "slint",

@@ -1,9 +1,12 @@
+#![cfg(target_os = "macos")]
+
 //! ScreenCaptureKit system-audio source for macOS 13+.
 //!
 //! Apple callbacks only copy bounded Float32 PCM into the existing raw ingress;
 //! resampling, mixing, framing, and network work remain on the audio worker.
 
-use super::{CaptureSource, RAW_QUEUE_CHUNKS, RawChunk, RawEvent};
+#![deny(unsafe_op_in_unsafe_fn)]
+
 use anyhow::{Result, anyhow};
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
@@ -17,7 +20,7 @@ use objc2_screen_capture_kit::{
 };
 use std::{
     mem::size_of,
-    sync::{Mutex, mpsc::SyncSender},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -27,14 +30,27 @@ const MAX_AUDIO_BYTES: usize = SAMPLE_RATE as usize * CHANNELS as usize * size_o
 const MAX_AUDIO_BUFFERS: usize = 8;
 const START_TIMEOUT: Duration = Duration::from_secs(8);
 
-pub(super) struct MacSystemCapture {
+#[derive(Debug)]
+pub struct AudioChunk {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub samples: Vec<f32>,
+}
+
+#[derive(Debug)]
+pub enum CaptureEvent {
+    Data(AudioChunk),
+    Failed,
+}
+
+pub struct MacSystemCapture {
     stream: Retained<SCStream>,
     delegate: Retained<Delegate>,
     queue: DispatchRetained<DispatchQueue>,
 }
 
 impl MacSystemCapture {
-    pub(super) fn start(sender: SyncSender<RawEvent>) -> Result<Self> {
+    pub fn start(notify: impl Fn(CaptureEvent) + Send + Sync + 'static) -> Result<Self> {
         let content = shareable_content()?;
         let displays = unsafe { content.displays() };
         if displays.count() == 0 {
@@ -63,7 +79,7 @@ impl MacSystemCapture {
             configuration.setQueueDepth(3);
         }
 
-        let delegate = Delegate::new(sender);
+        let delegate = Delegate::new(std::sync::Arc::new(notify));
         let queue = DispatchQueue::new("com.gemini.live.translator.system-audio", None);
         let stream = unsafe {
             SCStream::initWithFilter_configuration_delegate(
@@ -99,8 +115,10 @@ impl Drop for MacSystemCapture {
     }
 }
 
+type EventCallback = dyn Fn(CaptureEvent) + Send + Sync;
+
 struct DelegateIvars {
-    sender: Mutex<Option<SyncSender<RawEvent>>>,
+    callback: Mutex<Option<Arc<EventCallback>>>,
 }
 
 define_class!(
@@ -114,8 +132,8 @@ define_class!(
     unsafe impl SCStreamDelegate for Delegate {
         #[unsafe(method(stream:didStopWithError:))]
         unsafe fn did_stop(&self, _stream: &SCStream, _error: &NSError) {
-            if let Some(sender) = self.lock_sender().take() {
-                let _ = sender.try_send(RawEvent::Failed);
+            if let Some(callback) = self.lock_callback().take() {
+                callback(CaptureEvent::Failed);
             }
         }
     }
@@ -134,36 +152,36 @@ define_class!(
             let Some(chunk) = extract_audio(sample_buffer) else {
                 return;
             };
-            if let Ok(sender) = self.ivars().sender.try_lock()
-                && let Some(sender) = sender.as_ref()
+            if let Ok(callback) = self.ivars().callback.try_lock()
+                && let Some(callback) = callback.as_ref()
             {
-                let _ = sender.try_send(RawEvent::Data(chunk));
+                callback(CaptureEvent::Data(chunk));
             }
         }
     }
 );
 
 impl Delegate {
-    fn new(sender: SyncSender<RawEvent>) -> Retained<Self> {
+    fn new(callback: Arc<EventCallback>) -> Retained<Self> {
         let this = Self::alloc().set_ivars(DelegateIvars {
-            sender: Mutex::new(Some(sender)),
+            callback: Mutex::new(Some(callback)),
         });
         unsafe { msg_send![super(this), init] }
     }
 
-    fn lock_sender(&self) -> std::sync::MutexGuard<'_, Option<SyncSender<RawEvent>>> {
+    fn lock_callback(&self) -> std::sync::MutexGuard<'_, Option<Arc<EventCallback>>> {
         self.ivars()
-            .sender
+            .callback
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn disable(&self) {
-        self.lock_sender().take();
+        self.lock_callback().take();
     }
 }
 
-fn extract_audio(sample_buffer: &CMSampleBuffer) -> Option<RawChunk> {
+fn extract_audio(sample_buffer: &CMSampleBuffer) -> Option<AudioChunk> {
     let mut needed = 0usize;
     let status = unsafe {
         sample_buffer.audio_buffer_list_with_retained_block_buffer(
@@ -250,8 +268,7 @@ fn extract_audio(sample_buffer: &CMSampleBuffer) -> Option<RawChunk> {
         }
         (interleaved, u16::try_from(count).ok()?)
     };
-    Some(RawChunk {
-        source: CaptureSource::System,
+    Some(AudioChunk {
         sample_rate: SAMPLE_RATE,
         channels,
         samples,
@@ -305,5 +322,3 @@ struct SendObject<T>(Retained<T>);
 // SAFETY: Objective-C objects are retained while crossing the completion
 // queue, and ScreenCaptureKit's shareable content object is immutable here.
 unsafe impl<T> Send for SendObject<T> {}
-
-const _: () = assert!(RAW_QUEUE_CHUNKS >= 1);

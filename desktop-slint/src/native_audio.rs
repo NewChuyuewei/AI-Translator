@@ -21,9 +21,6 @@ use std::{
 use tokio::sync::mpsc as tokio_mpsc;
 use translator_core::{AudioSourceMode, session_port::NoticeText};
 
-#[cfg(target_os = "macos")]
-mod macos_screen_capture;
-
 pub const PCM_SAMPLE_RATE: u32 = 16_000;
 pub const PCM_FRAME_SAMPLES: usize = 640;
 pub const PCM_FRAME_BYTES: usize = PCM_FRAME_SAMPLES * 2;
@@ -308,9 +305,21 @@ fn run_capture(
         {
             return Err(anyhow!("所选 ScreenCaptureKit 系统音频源已不可用"));
         }
-        Some(macos_screen_capture::MacSystemCapture::start(
-            raw_sender.clone(),
-        )?)
+        Some(macos_system_audio::MacSystemCapture::start({
+            let raw_sender = raw_sender.clone();
+            move |event| {
+                let event = match event {
+                    macos_system_audio::CaptureEvent::Data(chunk) => RawEvent::Data(RawChunk {
+                        source: CaptureSource::System,
+                        sample_rate: chunk.sample_rate,
+                        channels: chunk.channels,
+                        samples: chunk.samples,
+                    }),
+                    macos_system_audio::CaptureEvent::Failed => RawEvent::Failed,
+                };
+                let _ = raw_sender.try_send(event);
+            }
+        })?)
     } else {
         None
     };

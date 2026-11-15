@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/caption-platform",
   "crates/desktop-lifecycle",
+  "crates/macos-system-audio",
   "crates/translator-core",
   "desktop-slint",
 ]
