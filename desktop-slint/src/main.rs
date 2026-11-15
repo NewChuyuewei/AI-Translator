@@ -5,10 +5,12 @@
 slint::include_modules!();
 
 mod config_store;
+mod device_provider;
 
 use anyhow::anyhow;
 use config_store::ConfigStore;
-use slint::ComponentHandle;
+use device_provider::NativeDeviceProvider;
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::{cell::RefCell, rc::Rc};
 use translator_core::{
     AudioSourceMode, ModelKind, ProxyMode, SessionOptions, SessionPhase, ThinkingLevel,
@@ -24,15 +26,6 @@ use zeroize::Zeroize;
 /// the real socket/audio runtime remains disabled until its adapter is proven.
 #[derive(Default)]
 struct PendingNativeSessionPort;
-
-#[derive(Default)]
-struct PendingNativeDeviceProvider;
-
-impl DeviceProvider for PendingNativeDeviceProvider {
-    fn refresh(&mut self) -> anyhow::Result<AudioDevices> {
-        Err(anyhow!("原生设备适配器尚未完成验证；未打开任何音频设备"))
-    }
-}
 
 impl SessionPort for PendingNativeSessionPort {
     fn start(&mut self, options: &SessionOptions) -> anyhow::Result<()> {
@@ -60,7 +53,17 @@ fn selected<T: Copy>(index: i32, values: &[T], safe_default: T) -> T {
         .unwrap_or(safe_default)
 }
 
-fn options_from_ui(ui: &ControlWindow) -> SessionOptions {
+fn selected_device(
+    index: i32,
+    devices: &[translator_core::devices::AudioDeviceInfo],
+) -> Option<String> {
+    usize::try_from(index.saturating_sub(1))
+        .ok()
+        .and_then(|index| devices.get(index))
+        .map(|device| device.id.clone())
+}
+
+fn options_from_ui(ui: &ControlWindow, devices: &AudioDevices) -> SessionOptions {
     let model = selected(
         ui.get_model_index(),
         &[
@@ -97,10 +100,10 @@ fn options_from_ui(ui: &ControlWindow) -> SessionOptions {
             ],
             AudioSourceMode::MicrophoneOnly,
         ),
-        microphone_device: None,
-        system_device: None,
+        microphone_device: selected_device(ui.get_microphone_index(), &devices.microphones),
+        system_device: selected_device(ui.get_system_index(), &devices.system_sources),
         playback_enabled: ui.get_playback_enabled() && !model.is_transcription_only(),
-        playback_device: None,
+        playback_device: selected_device(ui.get_playback_index(), &devices.playback_devices),
         token_saver: ui.get_token_saver(),
         proxy_mode: selected(
             ui.get_proxy_index(),
@@ -151,6 +154,67 @@ fn apply_settings(ui: &ControlWindow, settings: &PersistedSettings) {
     ui.set_playback_enabled(options.play_translation());
     ui.set_overlay_scale(options.overlay_scale as f32);
     ui.set_save_sensitive(settings.save_sensitive);
+    ui.set_microphone_device_id(options.microphone_device.as_deref().unwrap_or("").into());
+    ui.set_system_device_id(options.system_device.as_deref().unwrap_or("").into());
+    ui.set_playback_device_id(options.playback_device.as_deref().unwrap_or("").into());
+}
+
+fn device_model(
+    default_label: &str,
+    devices: &[translator_core::devices::AudioDeviceInfo],
+) -> ModelRc<SharedString> {
+    let values = std::iter::once(SharedString::from(default_label))
+        .chain(
+            devices
+                .iter()
+                .map(|device| SharedString::from(&device.name)),
+        )
+        .collect::<Vec<_>>();
+    Rc::new(VecModel::from(values)).into()
+}
+
+fn restored_device_index(id: &str, devices: &[translator_core::devices::AudioDeviceInfo]) -> i32 {
+    devices
+        .iter()
+        .position(|device| device.id == id)
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .unwrap_or(0)
+}
+
+fn capture_device_ids(ui: &ControlWindow, devices: &AudioDevices) {
+    ui.set_microphone_device_id(
+        selected_device(ui.get_microphone_index(), &devices.microphones)
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_system_device_id(
+        selected_device(ui.get_system_index(), &devices.system_sources)
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_playback_device_id(
+        selected_device(ui.get_playback_index(), &devices.playback_devices)
+            .unwrap_or_default()
+            .into(),
+    );
+}
+
+fn apply_devices(ui: &ControlWindow, devices: &AudioDevices) {
+    ui.set_microphone_model(device_model("系统默认麦克风", &devices.microphones));
+    ui.set_system_model(device_model("系统默认音频源", &devices.system_sources));
+    ui.set_playback_model(device_model("系统默认播放设备", &devices.playback_devices));
+    ui.set_microphone_index(restored_device_index(
+        ui.get_microphone_device_id().as_str(),
+        &devices.microphones,
+    ));
+    ui.set_system_index(restored_device_index(
+        ui.get_system_device_id().as_str(),
+        &devices.system_sources,
+    ));
+    ui.set_playback_index(restored_device_index(
+        ui.get_playback_device_id().as_str(),
+        &devices.playback_devices,
+    ));
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -179,15 +243,27 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let session = Rc::new(RefCell::new(PendingNativeSessionPort));
-    let devices = Rc::new(RefCell::new(PendingNativeDeviceProvider));
+    let device_provider = Rc::new(RefCell::new(NativeDeviceProvider));
+    let devices = Rc::new(RefCell::new(AudioDevices::default()));
+    match device_provider.borrow_mut().refresh() {
+        Ok(snapshot) => {
+            apply_devices(&control, &snapshot);
+            *devices.borrow_mut() = snapshot;
+        }
+        Err(error) => control.set_status_message(error.to_string().into()),
+    }
     let weak = control.as_weak();
     let callback_session = Rc::clone(&session);
+    let callback_devices = Rc::clone(&devices);
     control.on_start_stop(move || {
         let Some(ui) = weak.upgrade() else {
             return;
         };
-        let options = options_from_ui(&ui);
-        let result = callback_session.borrow_mut().start(&options);
+        let options = options_from_ui(&ui, &callback_devices.borrow());
+        let result = callback_devices
+            .borrow()
+            .validate_selection(&options)
+            .and_then(|()| callback_session.borrow_mut().start(&options));
         match result {
             Ok(()) => ui.set_status_message("原生会话已启动".into()),
             Err(error) => ui.set_status_message(error.to_string().into()),
@@ -196,6 +272,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let weak = control.as_weak();
     let callback_config = config.clone();
+    let callback_devices = Rc::clone(&devices);
     control.on_save_settings(move || {
         let Some(ui) = weak.upgrade() else {
             return;
@@ -204,7 +281,7 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_status_message("无法定位配置目录；设置未保存".into());
             return;
         };
-        let options = options_from_ui(&ui);
+        let options = options_from_ui(&ui, &callback_devices.borrow());
         let save_sensitive = ui.get_save_sensitive();
         let mut password = ui.get_vault_password().to_string();
         ui.set_vault_password("".into());
@@ -237,6 +314,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let weak = control.as_weak();
     let callback_config = config.clone();
+    let callback_devices = Rc::clone(&devices);
     control.on_unlock_vault(move || {
         let Some(ui) = weak.upgrade() else {
             return;
@@ -254,7 +332,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_save_sensitive(true);
             })
         } else {
-            let options = options_from_ui(&ui);
+            let options = options_from_ui(&ui, &callback_devices.borrow());
             let payload = SecretPayload {
                 api_key: options.api_key.clone(),
                 proxy_url: options.proxy_url.clone(),
@@ -276,6 +354,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let weak = control.as_weak();
     let callback_config = config.clone();
+    let callback_devices = Rc::clone(&devices);
     control.on_remove_vault(move || {
         let Some(ui) = weak.upgrade() else {
             return;
@@ -284,7 +363,7 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_status_message("无法定位配置目录；保险库不可用".into());
             return;
         };
-        let options = options_from_ui(&ui);
+        let options = options_from_ui(&ui, &callback_devices.borrow());
         match store
             .save_settings(&options, false)
             .and_then(|()| store.remove_vault())
@@ -302,20 +381,26 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let weak = control.as_weak();
+    let callback_provider = Rc::clone(&device_provider);
     let callback_devices = Rc::clone(&devices);
     control.on_refresh_devices(move || {
         let Some(ui) = weak.upgrade() else {
             return;
         };
-        match callback_devices.borrow_mut().refresh() {
-            Ok(snapshot) => ui.set_status_message(
-                format!(
-                    "已刷新 {} 个有界设备（平台 {}）",
-                    snapshot.total_count(),
-                    snapshot.platform
-                )
-                .into(),
-            ),
+        capture_device_ids(&ui, &callback_devices.borrow());
+        match callback_provider.borrow_mut().refresh() {
+            Ok(snapshot) => {
+                apply_devices(&ui, &snapshot);
+                ui.set_status_message(
+                    format!(
+                        "已刷新 {} 个有界设备（平台 {}）；尚未打开音频流",
+                        snapshot.total_count(),
+                        snapshot.platform
+                    )
+                    .into(),
+                );
+                *callback_devices.borrow_mut() = snapshot;
+            }
             Err(error) => ui.set_status_message(error.to_string().into()),
         }
     });
@@ -345,4 +430,28 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     control.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use translator_core::devices::AudioDeviceInfo;
+
+    fn device(id: &str) -> AudioDeviceInfo {
+        AudioDeviceInfo {
+            id: id.into(),
+            name: id.into(),
+            is_default: false,
+        }
+    }
+
+    #[test]
+    fn swr_ndev_002_ui_indices_preserve_backend_identifiers() {
+        let devices = vec![device("mic-a"), device("mic-b")];
+        assert_eq!(restored_device_index("", &devices), 0);
+        assert_eq!(restored_device_index("mic-b", &devices), 2);
+        assert_eq!(selected_device(0, &devices), None);
+        assert_eq!(selected_device(2, &devices).as_deref(), Some("mic-b"));
+        assert_eq!(selected_device(99, &devices), None);
+    }
 }
