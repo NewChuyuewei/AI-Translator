@@ -46,6 +46,10 @@
 | SWR-DEV-004 | `DeviceProvider`、`MemoryDeviceProvider`、Slint 快照替换分支 | `swr_dev_004_memory_provider_has_deterministic_recovery`、失败保留代码评审 |
 | SWR-NDEV-001 | Slint `NativeDeviceProvider::refresh`（仅 CPAL 枚举 trait） | workspace/Windows/macOS 编译；API 代码评审；真机待办 `ASSURANCE-TARGET-002` |
 | SWR-NDEV-002 | Slint `apply_devices`、`selected_device`、启动前 `validate_selection` | `swr_ndev_002_ui_indices_preserve_backend_identifiers`、`swr_dev_003_stale_and_cross_class_selections_are_rejected`、真机待办 `ASSURANCE-TARGET-002` |
+| SWR-PXY-001 | `proxy::ProxyEndpoint`、`ProxyKind` | `swr_pxy_001_supported_endpoints_are_canonical_and_typed`、旧代理隧道测试 |
+| SWR-PXY-002 | `ProxyCredentials`、`parse_credentials`、`Drop` | `swr_pxy_002_credentials_are_decoded_bounded_and_never_echoed`、代码评审 |
+| SWR-PXY-003 | `ProxyEndpoint::parse` 安全错误映射 | `swr_pxy_003_structure_and_credential_limits_are_enforced`、旧代理脱敏测试 |
+| SWR-PXY-004 | `ProxyEndpoint::safe_label`、核心无运行时边界 | `swr_pxy_004_labels_are_fixed_and_credential_free`、依赖评审 |
 
 ## 开放验证项
 

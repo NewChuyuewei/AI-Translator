@@ -6,12 +6,12 @@
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use url::Url;
 use zeroize::Zeroize;
 
 pub mod devices;
 pub mod diagnostics;
 pub mod protocol;
+pub mod proxy;
 pub mod server_protocol;
 pub mod session_driver;
 pub mod session_port;
@@ -194,24 +194,7 @@ pub fn checked_overlay_scale(scale: f64) -> Result<f64> {
 /// Structural validation only. Authentication details are intentionally never
 /// included in errors. Transport-specific parsing remains in the network adapter.
 pub fn validate_manual_proxy(value: &str) -> Result<()> {
-    let value = value.trim();
-    if value.is_empty() || value.len() > 2048 || value.chars().any(char::is_control) {
-        return Err(anyhow!("请填写有效的代理地址"));
-    }
-    let url =
-        Url::parse(value).map_err(|_| anyhow!("代理地址格式无效；示例 http://127.0.0.1:7890"))?;
-    if !matches!(url.scheme(), "http" | "socks" | "socks5" | "socks5h") {
-        return Err(anyhow!("只支持 http://、socks5:// 或 socks5h:// 代理地址"));
-    }
-    if url.host().is_none()
-        || url.port_or_known_default().is_none()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !matches!(url.path(), "" | "/")
-    {
-        return Err(anyhow!("代理地址只能包含主机、端口及可选的用户名密码"));
-    }
-    Ok(())
+    proxy::ProxyEndpoint::parse(value).map(|_| ())
 }
 
 /// SWR-CORE-001, SWR-CORE-002: all externally visible lifecycle states are

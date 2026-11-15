@@ -2,24 +2,18 @@
 //! credentials never enter logs, errors, the Gemini URL, or the TLS handshake.
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 use std::{net::IpAddr, time::Duration};
 use tauri::AppHandle;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::watch};
-use url::{Host, Url};
+use url::Host;
 pub use translator_core::ProxyMode;
+use translator_core::proxy::{ProxyEndpoint as Proxy, ProxyKind as Kind};
 
 // PAC/ProxySelector expect the HTTPS form of the actual WebSocket destination;
 // no API key or other secret is included in the URL supplied to the resolver.
 pub const PROXY_TARGET: &str = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
-#[derive(Clone)]
-struct Credentials { username: Vec<u8>, password: Vec<u8> }
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind { Http, Socks5 }
-#[derive(Clone)]
-struct Proxy { kind: Kind, host: String, port: u16, credentials: Option<Credentials> }
 #[derive(Clone)]
 enum Destination { Direct, Proxy(Proxy) }
 
@@ -27,63 +21,15 @@ enum Destination { Direct, Proxy(Proxy) }
 pub struct Route { destination: Destination, label: &'static str }
 impl Route {
     fn direct(label: &'static str) -> Self { Self { destination: Destination::Direct, label } }
-    fn via(proxy: Proxy, auto: bool) -> Self {
-        let label = match (auto, proxy.kind) {
-            (true, Kind::Http) => "系统/环境 HTTP 代理",
-            (true, Kind::Socks5) => "系统/环境 SOCKS5 代理",
-            (false, Kind::Http) => "手动 HTTP 代理",
-            (false, Kind::Socks5) => "手动 SOCKS5 代理",
-        };
+    fn via(proxy: Proxy, automatic: bool) -> Self {
+        let label = proxy.safe_label(automatic);
         Self { destination: Destination::Proxy(proxy), label }
     }
     pub fn label(&self) -> &'static str { self.label }
 }
 
-fn normalized_host(host: Host<&str>) -> String {
-    match host { Host::Domain(s) => s.to_owned(), Host::Ipv4(v) => v.to_string(), Host::Ipv6(v) => v.to_string() }
-}
-fn credentials(url: &Url) -> Result<Option<Credentials>> {
-    if url.username().is_empty() && url.password().is_none() { return Ok(None); }
-    let decode = |s: &str| -> Result<Vec<u8>> {
-        let bytes = percent_decode_str(s).collect::<Vec<_>>();
-        if bytes.len() > 255 || bytes.iter().any(|b| b.is_ascii_control()) {
-            return Err(anyhow!("代理用户名或密码过长或含控制字符"));
-        }
-        Ok(bytes)
-    };
-    let username = decode(url.username())?;
-    let password = decode(url.password().unwrap_or(""))?;
-    if username.contains(&b':') { return Err(anyhow!("代理用户名不能包含冒号")); }
-    Ok(Some(Credentials { username, password }))
-}
-
-// The supported proxy endpoint itself is plaintext HTTP CONNECT or SOCKS5;
-// WSS (including the API key) remains inside a separate verified TLS tunnel.
 fn parse_proxy(value: &str) -> Result<Proxy> {
-    let value = value.trim();
-    if value.is_empty() || value.len() > 2048 || value.chars().any(char::is_control) {
-        return Err(anyhow!("请填写有效的代理地址"));
-    }
-    // Never include the original value or url::ParseError in an error message:
-    // the URL may contain a username and password.
-    let url = Url::parse(value).map_err(|_| anyhow!("代理地址格式无效；示例 http://127.0.0.1:7890"))?;
-    let kind = match url.scheme() {
-        "http" => Kind::Http,
-        "socks" | "socks5" | "socks5h" => Kind::Socks5,
-        "https" => return Err(anyhow!("暂不支持加密的 HTTPS 代理入口；请改用 HTTP CONNECT 或 SOCKS5 入口")),
-        _ => return Err(anyhow!("只支持 http://、socks5:// 或 socks5h:// 代理地址")),
-    };
-    if url.host().is_none() || url.query().is_some() || url.fragment().is_some() || !matches!(url.path(), "" | "/") {
-        return Err(anyhow!("代理地址只能包含主机、端口及可选的用户名密码"));
-    }
-    let host = normalized_host(url.host().unwrap());
-    let port = url.port_or_known_default().ok_or_else(|| anyhow!("代理地址需要端口"))?;
-    if port == 0 { return Err(anyhow!("代理端口无效")); }
-    let credentials = credentials(&url)?;
-    if kind == Kind::Socks5 && credentials.as_ref().is_some_and(|c| c.username.is_empty()) {
-        return Err(anyhow!("SOCKS5 用户名不能为空"));
-    }
-    Ok(Proxy { kind, host, port, credentials })
+    Proxy::parse(value)
 }
 
 pub fn validate(mode: ProxyMode, address: &str) -> Result<()> {
