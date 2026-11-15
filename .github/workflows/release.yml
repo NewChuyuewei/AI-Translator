@@ -99,7 +99,7 @@ jobs:
         run: |
           try {
             $version = "${env:RELEASE_TAG}".TrimStart('v')
-            $payload = Join-Path $env:RUNNER_TEMP "slint-windows-payload"
+            $payload = Join-Path (Resolve-Path "packaging").Path "payload"
             $portable = Join-Path $env:RUNNER_TEMP "Gemini-Live-Translator-$version-Windows-portable"
             New-Item -ItemType Directory -Force -Path $payload, $portable, "release-assets" | Out-Null
             Copy-Item "target/release/gemini-live-translator.exe" (Join-Path $payload "Gemini-Live-Translator.exe")
@@ -108,11 +108,10 @@ jobs:
             Copy-Item "COPYRIGHT" (Join-Path $portable "COPYRIGHT.txt")
             Compress-Archive -Path "$portable/*" -DestinationPath "release-assets/Gemini-Live-Translator-$version-Windows-portable.zip" -CompressionLevel Optimal
             $installer = (Resolve-Path "release-assets").Path + "\Gemini-Live-Translator-$version-Windows-Setup.exe"
-            $payloadNsis = $payload.Replace('\', '/')
             $installerNsis = $installer.Replace('\', '/')
             if (-not (Test-Path (Join-Path $payload "Gemini-Live-Translator.exe"))) { throw "Staged executable is missing" }
             $makensis = (Get-Command makensis.exe -ErrorAction Stop).Source
-            $nsisOutput = & $makensis "/INPUTCHARSET" "UTF8" "/DINPUT_DIR=$payloadNsis" "/DOUTPUT_FILE=$installerNsis" "packaging/windows-installer.nsi" 2>&1
+            $nsisOutput = & $makensis "/INPUTCHARSET" "UTF8" "/DOUTPUT_FILE=$installerNsis" "packaging/windows-installer.nsi" 2>&1
             $nsisOutput | Write-Output
             if ($LASTEXITCODE -ne 0) {
               $nsisTail = ($nsisOutput | Select-Object -Last 20) -join "`n"

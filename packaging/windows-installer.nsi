@@ -7,9 +7,6 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 !include "x64.nsh"
 
-!ifndef INPUT_DIR
-  !error "Define INPUT_DIR containing Gemini-Live-Translator.exe"
-!endif
 !ifndef OUTPUT_FILE
   !error "Define OUTPUT_FILE for the installer exe"
 !endif
@@ -54,7 +51,7 @@ FunctionEnd
 Section "Install"
   SetShellVarContext current
   SetOutPath "$INSTDIR"
-  File "${INPUT_DIR}/${APP_EXE}"
+  File "${__FILEDIR__}/payload/${APP_EXE}"
   File /oname=COPYRIGHT.txt "${__FILEDIR__}/../COPYRIGHT"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
