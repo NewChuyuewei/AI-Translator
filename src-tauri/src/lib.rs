@@ -15,7 +15,7 @@ use diagnostics::{LogEntry, LogStore, Trace};
 use futures_util::{SinkExt, StreamExt};
 use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, ThinkingLevel, TranscriptionMode};
 use proxy::ProxyMode;
-use translator_core::{checked_overlay_scale, SessionEvent, SessionOptions as StartOptions, SessionPhase, SessionStatus as Status};
+use translator_core::{checked_overlay_scale, settings::{decode_settings, encode_settings, settings_for_storage, PersistedSettings}, SessionEvent, SessionOptions as StartOptions, SessionPhase, SessionStatus as Status};
 use ring::{aead, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::{Read, Write}, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
@@ -40,21 +40,12 @@ fn validate_options(options: &StartOptions) -> Result<()> {
     proxy::validate(options.proxy_mode, &options.proxy_url)
 }
 
-const SETTINGS_VERSION: u8 = 2;
 const SETTINGS_FILE: &str = "settings.json";
 const SECRETS_FILE: &str = "secrets.enc.json";
 const SECRET_AAD: &[u8] = b"com.gemini.live.translator/secrets/v1";
 const PBKDF2_ITERATIONS: u32 = 210_000;
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedSettings {
-    version: u8,
-    save_sensitive: bool,
-    options: StartOptions,
-}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,15 +66,6 @@ struct EncryptedSecrets {
     salt: String,
     nonce: String,
     ciphertext: String,
-}
-
-fn settings_for_storage(options: &StartOptions, save_sensitive: bool) -> PersistedSettings {
-    let mut options = options.clone();
-    // Secrets never belong to the regular preferences file. The opt-in only
-    // controls whether a separate password-encrypted vault is maintained.
-    options.api_key.clear();
-    options.proxy_url.clear();
-    PersistedSettings { version: SETTINGS_VERSION, save_sensitive, options }
 }
 
 fn config_path(app: &AppHandle, name: &str) -> Result<PathBuf> {
@@ -146,7 +128,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn write_settings(app: &AppHandle, settings: &PersistedSettings) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(settings).context("无法编码用户设置")?;
+    let bytes = encode_settings(settings)?;
     write_private(&config_path(app, SETTINGS_FILE)?, &bytes)
 }
 
@@ -165,24 +147,13 @@ fn read_settings(app: &AppHandle) -> Result<Option<PersistedSettings>> {
     let path = config_path(app, SETTINGS_FILE)?;
     if !path.try_exists().context("无法检查用户设置")? { return Ok(None); }
     let bytes = read_bounded(&path, "用户设置")?;
-    let mut settings: PersistedSettings = serde_json::from_slice(&bytes).context("用户设置文件已损坏")?;
-    if settings.version == 1 {
-        // 0.1.5 development snapshots briefly stored opted-in secrets in this
-        // file. Remove them during migration; they cannot be encrypted without
-        // asking for a password, so the user must enter them once more.
-        settings.version = SETTINGS_VERSION;
-        settings.save_sensitive = false;
-        settings.options.api_key.clear();
-        settings.options.proxy_url.clear();
-        write_settings(app, &settings).context("无法迁移旧用户设置")?;
-    } else if settings.version != SETTINGS_VERSION {
-        return Err(anyhow!("不支持的用户设置版本 {}；请删除旧配置后重试", settings.version));
+    let decoded = decode_settings(&bytes)?;
+    if decoded.migration_required {
+        // Commit the sanitized replacement atomically. Until this succeeds the
+        // legacy file remains the recoverable source of truth.
+        write_settings(app, &decoded.settings).context("无法迁移旧用户设置")?;
     }
-    // Defense in depth for hand-edited files.
-    settings.options.api_key.clear();
-    settings.options.proxy_url.clear();
-    settings.options.overlay_scale = checked_overlay_scale(settings.options.overlay_scale).unwrap_or(1.0);
-    Ok(Some(settings))
+    Ok(Some(decoded.settings))
 }
 
 fn validate_vault_password(password: &str) -> Result<()> {

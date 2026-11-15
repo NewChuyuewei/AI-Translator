@@ -14,6 +14,7 @@ pub mod protocol;
 pub mod server_protocol;
 pub mod session_driver;
 pub mod session_port;
+pub mod settings;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
