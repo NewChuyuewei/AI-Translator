@@ -3,14 +3,14 @@
 //! Apple callbacks only copy bounded Float32 PCM into the existing raw ingress;
 //! resampling, mixing, framing, and network work remain on the audio worker.
 
-use crate::{AudioChunk, CaptureEvent, interleave_planar};
+use crate::{AudioChunk, CaptureEvent, interleave_planar, supports_audio_capture};
 use anyhow::{Result, anyhow};
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::{AnyThread, DefinedClass, define_class, msg_send, rc::Retained};
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
 use objc2_core_media::{CMBlockBuffer, CMSampleBuffer, CMTime};
-use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
+use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSProcessInfo};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate,
     SCStreamOutput, SCStreamOutputType, SCWindow,
@@ -35,6 +35,14 @@ pub struct MacSystemCapture {
 
 impl MacSystemCapture {
     pub fn start(notify: impl Fn(CaptureEvent) + Send + Sync + 'static) -> Result<Self> {
+        let version = NSProcessInfo::processInfo().operatingSystemVersion();
+        if !supports_audio_capture((
+            version.majorVersion as u64,
+            version.minorVersion as u64,
+            version.patchVersion as u64,
+        )) {
+            return Err(anyhow!("ScreenCaptureKit 系统音频需要 macOS 13 或更高版本"));
+        }
         let content = shareable_content()?;
         let displays = unsafe { content.displays() };
         if displays.count() == 0 {

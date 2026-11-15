@@ -15,6 +15,11 @@ pub enum CaptureEvent {
     Failed,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn supports_audio_capture(version: (u64, u64, u64)) -> bool {
+    version >= (13, 0, 0)
+}
+
 /// Interleave equally formatted Float32 planes without reading beyond the
 /// shortest plane. Bounds are checked before allocation.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -58,6 +63,13 @@ impl MacSystemCapture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn swr_naudio_006_requires_macos_13_for_system_audio() {
+        assert!(!supports_audio_capture((12, 7, 6)));
+        assert!(supports_audio_capture((13, 0, 0)));
+        assert!(supports_audio_capture((26, 1, 0)));
+    }
 
     #[test]
     fn swr_naudio_006_planar_audio_is_bounded_and_interleaved() {
