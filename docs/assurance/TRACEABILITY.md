@@ -9,6 +9,10 @@
 | SWR-CORE-005 | serde rename/alias 契约 | `swr_core_005_serialized_contract_remains_compatible_with_existing_settings`、前端 mock 测试 |
 | SWR-UI-001 | `desktop-slint/src/main.rs` 的适配器未接入安全拒绝路径 | Slint workspace 编译；UI 集成测试待办 `ASSURANCE-UI-001` |
 | SWR-CFG-001 | `scripts/set-version.mjs`、`scripts/check-version.mjs` | `tests/version_script_test.mjs`、CI version gate |
+| SWR-PROTO-001 | `translator_core::protocol::setup`、`LiveProtocolConfig` | `swr_proto_001_setup_is_model_specific_and_contains_no_credentials`、旧 WebSocket setup 测试 |
+| SWR-PROTO-002 | `protocol::setup` 的模型专属分支 | `swr_proto_002_translation_and_transcription_semantics_are_distinct`、旧精确 setup 回归测试 |
+| SWR-PROTO-003 | `protocol::audio_frame`、`MAX_AUDIO_BYTES_PER_MESSAGE` | `swr_proto_003_audio_frames_are_bounded_and_exactly_encoded` |
+| SWR-PROTO-004 | `protocol::stream_end` | `swr_proto_004_stream_end_has_no_implicit_audio_payload` |
 
 ## 开放验证项
 

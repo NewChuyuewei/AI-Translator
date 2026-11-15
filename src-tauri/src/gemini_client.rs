@@ -29,21 +29,6 @@ pub struct GeminiOptions {
     #[serde(default = "default_other_language")] pub other_language: String,
 }
 fn default_other_language() -> String { "en".into() }
-fn language_instruction_name(code: &str) -> String {
-    let name = match code.to_ascii_lowercase().as_str() {
-        "zh" | "zh-hans" | "cmn-hans" => "Simplified Chinese",
-        "zh-hant" | "cmn-hant" => "Traditional Chinese",
-        "en" | "en-us" | "en-gb" => "English",
-        "ja" | "ja-jp" => "Japanese",
-        "ko" | "ko-kr" => "Korean",
-        "es" => "Spanish",
-        "fr" => "French",
-        "de" => "German",
-        "it" => "Italian",
-        _ => return format!("the language identified by BCP-47 code {code}"),
-    };
-    format!("{name} ({code})")
-}
 fn valid_language(value: &str) -> bool {
     (2..=24).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-')
 }
@@ -59,64 +44,26 @@ impl GeminiOptions {
         Ok(())
     }
 }
-
-pub fn setup(options: &GeminiOptions) -> Value {
-    match options.model {
-        ModelKind::LiveTranslate35 => {
-            // The translation model accepts one fixed destination language per
-            // session. Google's supported Chinese codes distinguish scripts.
-            let language = if options.target_language.eq_ignore_ascii_case("zh") { "zh-Hans" } else { &options.target_language };
-            json!({"setup": {
-                "model": "models/gemini-3.5-live-translate-preview",
-                "generationConfig": {
-                    "responseModalities": ["AUDIO"],
-                    "translationConfig": {"targetLanguageCode": language, "echoTargetLanguage": false}
-                },
-                // For raw v1beta WebSockets these are setup fields, not
-                // generationConfig fields; nesting them there is rejected.
-                "inputAudioTranscription": {}, "outputAudioTranscription": {}
-            }})
-        }
-        ModelKind::TranscribeLive35 => json!({"setup": {
-            "model": "models/gemini-3.5-transcribe-live",
-            "generationConfig": {"responseModalities": ["TEXT"]},
-            // An empty language list enables multilingual auto-detection.
-            "inputAudioTranscription": {"languageCodes": [], "mode": options.transcription_mode}
-        }}),
-        ModelKind::GeneralLive | ModelKind::ExtendedThinking => {
-            let target = language_instruction_name(&options.target_language);
-            let other = language_instruction_name(&options.other_language);
-            let instruction = if options.bidirectional {
-                format!("Act only as a low-latency simultaneous interpreter. Translate speech in {target} into {other}, and speech in {other} into {target}. Start each translation as soon as a meaningful phrase is available. Output only the translation in the opposite language. Never repeat or transcribe the source language, answer questions, explain, add commentary, or mix source and target languages.")
-            } else {
-                format!("Act only as a low-latency simultaneous interpreter. Translate every heard utterance into {target}. Start speaking the translation as soon as a meaningful phrase is available instead of waiting for a full paragraph. Output only {target}. Never repeat or transcribe the source language, answer questions, explain, add commentary, or mix source and target languages.")
-            };
-            let (model, generation) = match options.model {
-                ModelKind::GeneralLive => ("models/gemini-3.8-live", json!({"responseModalities": ["AUDIO"]})),
-                ModelKind::ExtendedThinking => ("models/gemini-3.8-live-extended-thinking", json!({
-                    "responseModalities": ["AUDIO"], "thinkingConfig": {"thinkingLevel": options.thinking_level}
-                })),
-                _ => unreachable!(),
-            };
-            json!({"setup": {
-                "model": model, "generationConfig": generation,
-                "systemInstruction": {"parts": [{"text": instruction}]},
-                "realtimeInputConfig": {"automaticActivityDetection": {
-                    "disabled": false,
-                    "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-                    "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
-                    "prefixPaddingMs": 40,
-                    "silenceDurationMs": 400
-                }},
-                "inputAudioTranscription": {}, "outputAudioTranscription": {}
-            }})
-        }
+fn protocol_config(options: &GeminiOptions) -> translator_core::protocol::LiveProtocolConfig {
+    translator_core::protocol::LiveProtocolConfig {
+        model: options.model,
+        thinking_level: options.thinking_level,
+        transcription_mode: options.transcription_mode,
+        target_language: options.target_language.clone(),
+        bidirectional: options.bidirectional,
+        other_language: options.other_language.clone(),
     }
 }
-pub fn audio_frame(data: &[u8]) -> Message {
-    Message::Text(json!({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000", "data": STANDARD.encode(data)}}}).to_string().into())
+
+pub fn setup(options: &GeminiOptions) -> Value {
+    translator_core::protocol::setup(&protocol_config(options))
 }
-pub fn stream_end() -> Message { Message::Text(json!({"realtimeInput": {"audioStreamEnd": true}}).to_string().into()) }
+pub fn audio_frame(data: &[u8]) -> Result<Message> {
+    Ok(Message::Text(translator_core::protocol::audio_frame(data)?.into()))
+}
+pub fn stream_end() -> Message {
+    Message::Text(translator_core::protocol::stream_end().into())
+}
 
 pub async fn connect(options: &GeminiOptions, route: &Route, cancel: &mut watch::Receiver<bool>, trace: &Trace) -> Result<Socket> {
     connect_with_trace(ENDPOINT, options, route, cancel, None, trace).await
@@ -608,7 +555,7 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
         let (trace, _) = Trace::capturing(&options.api_key, "");
         let (_tx, mut rx) = watch::channel(false);
         let mut socket = tokio::time::timeout(Duration::from_secs(3), connect_with_trace(&format!("ws://{addr}"), &options, &proxy::direct_for_test(), &mut rx, None, &trace)).await.unwrap().unwrap();
-        socket.send(audio_frame(&[0, 0, 1, 0])).await.unwrap();
+        socket.send(audio_frame(&[0, 0, 1, 0]).unwrap()).await.unwrap();
         let mut caption = String::new();
         for expected in ["hello wor", "hello world", "Hello, world.", "another", "Another sentence."] {
             let ServerFrame::Data { value, .. } = decode_server_frame(socket.next().await.unwrap().unwrap()).unwrap() else { panic!("expected data") };
@@ -676,7 +623,7 @@ pub fn parse_server_value(root: &Value) -> Result<ParsedMessage> {
     }
 
     #[test] fn audio_frame_is_pcm_base64_and_stream_end_is_explicit() {
-        let frame = audio_frame(&[1, 2, 3, 4]).into_text().unwrap();
+        let frame = audio_frame(&[1, 2, 3, 4]).unwrap().into_text().unwrap();
         let v: Value = serde_json::from_str(&frame).unwrap();
         assert_eq!(v["realtimeInput"]["audio"]["mimeType"], "audio/pcm;rate=16000");
         assert_eq!(STANDARD.decode(v["realtimeInput"]["audio"]["data"].as_str().unwrap()).unwrap(), vec![1,2,3,4]);

@@ -11,6 +11,10 @@
 | SWR-CORE-005 | 提取后的核心序列化格式必须保持既有设置和前端 IPC 的字段名及枚举值兼容。 | 序列化回归测试 |
 | SWR-UI-001 | 后端适配器未接入时，Slint 壳层不得进入运行状态、采集音频或声称已连接。 | 代码评审；后续 UI 集成测试 |
 | SWR-CFG-001 | npm、Cargo workspace、Slint、Tauri 过渡入口、Android 和发行包装版本必须一致，且只能通过受控脚本修改。 | `npm run test:version` |
+| SWR-PROTO-001 | Gemini setup 构造必须位于不接收 API Key 的纯核心模块，并为四种模型生成明确且模型专属的配置。 | 模型矩阵单元测试、代码评审 |
+| SWR-PROTO-002 | 翻译和纯转写 setup 必须保持不同的响应模态和字段语义，禁止转写模式请求或伪造译音。 | 精确 JSON 单元测试 |
+| SWR-PROTO-003 | PCM 网络消息必须在 Base64/JSON 分配前执行 1 MiB 输入上限检查，并声明 16 kHz PCM MIME 类型。 | 边界和精确编码测试 |
+| SWR-PROTO-004 | 正常停止必须发送仅包含 `audioStreamEnd` 的确定性消息，不得附带残余 PCM。 | 精确 JSON 单元测试 |
 
 ## 需求约束
 
