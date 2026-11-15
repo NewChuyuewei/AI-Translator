@@ -53,7 +53,7 @@ pub fn decode_data_frame(kind: DataFrameKind, bytes: &[u8]) -> Result<Value> {
     if bytes.len() > MAX_SERVER_MESSAGE_BYTES {
         return Err(anyhow!("Gemini {}帧超过大小限制", kind.diagnostic_label()));
     }
-    let value = match kind {
+    let value: Value = match kind {
         DataFrameKind::Text => {
             let text =
                 std::str::from_utf8(bytes).map_err(|_| anyhow!("Gemini 文本帧不是有效 UTF-8"))?;
@@ -332,10 +332,9 @@ mod tests {
     #[test]
     fn swr_rx_001_text_and_binary_decoding_is_bounded_and_content_safe() {
         let fixture = br#"{"serverContent":{}}"#;
-        assert_eq!(
-            decode_data_frame(DataFrameKind::Text, fixture),
-            decode_data_frame(DataFrameKind::Binary, fixture)
-        );
+        let text = decode_data_frame(DataFrameKind::Text, fixture).expect("text fixture");
+        let binary = decode_data_frame(DataFrameKind::Binary, fixture).expect("binary fixture");
+        assert_eq!(text, binary);
         let secret = "PRIVATE-SERVER-CONTENT";
         let error = decode_data_frame(DataFrameKind::Text, secret.as_bytes())
             .expect_err("invalid JSON must fail")
