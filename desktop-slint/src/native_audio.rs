@@ -26,6 +26,8 @@ pub const PCM_FRAME_SAMPLES: usize = 640;
 pub const PCM_FRAME_BYTES: usize = PCM_FRAME_SAMPLES * 2;
 const RAW_QUEUE_CHUNKS: usize = 12;
 const EVENT_QUEUE_CAPACITY: usize = 4;
+const SILENCE_RMS_THRESHOLD: f32 = 0.003;
+const SILENCE_HANGOVER_FRAMES: u16 = 25;
 
 #[derive(Debug)]
 pub enum AudioTaskEvent {
@@ -95,18 +97,44 @@ impl Resampler {
     }
 }
 
+#[derive(Default)]
+struct SilenceGate {
+    quiet_frames: u16,
+}
+
+impl SilenceGate {
+    fn should_send(&mut self, samples: &[f32], enabled: bool) -> bool {
+        if !enabled {
+            return true;
+        }
+        let mean_square =
+            samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len().max(1) as f32;
+        if mean_square.sqrt() >= SILENCE_RMS_THRESHOLD {
+            self.quiet_frames = 0;
+            true
+        } else {
+            self.quiet_frames = self.quiet_frames.saturating_add(1);
+            self.quiet_frames <= SILENCE_HANGOVER_FRAMES
+        }
+    }
+}
+
 struct PcmFramer {
     resampler: Resampler,
     channels: u16,
     samples: VecDeque<f32>,
+    silence_gate: SilenceGate,
+    token_saver: bool,
 }
 
 impl PcmFramer {
-    fn new(sample_rate: u32, channels: u16) -> Self {
+    fn new(sample_rate: u32, channels: u16, token_saver: bool) -> Self {
         Self {
             resampler: Resampler::new(sample_rate),
             channels,
             samples: VecDeque::with_capacity(PCM_FRAME_SAMPLES * 2),
+            silence_gate: SilenceGate::default(),
+            token_saver,
         }
     }
 
@@ -114,8 +142,12 @@ impl PcmFramer {
         self.samples
             .extend(self.resampler.push_interleaved(samples, self.channels));
         while self.samples.len() >= PCM_FRAME_SAMPLES {
+            let frame: Vec<f32> = self.samples.drain(..PCM_FRAME_SAMPLES).collect();
+            if !self.silence_gate.should_send(&frame, self.token_saver) {
+                continue;
+            }
             let mut pcm = Vec::with_capacity(PCM_FRAME_BYTES);
-            for sample in self.samples.drain(..PCM_FRAME_SAMPLES) {
+            for sample in frame {
                 let value = (sample.clamp(-1.0, 1.0) * 32767.0).round() as i16;
                 pcm.extend_from_slice(&value.to_le_bytes());
             }
@@ -133,14 +165,22 @@ pub struct NativeAudioTask {
 }
 
 impl NativeAudioTask {
-    pub fn spawn(device_id: Option<String>, output: tokio_mpsc::Sender<Vec<u8>>) -> Self {
+    pub fn spawn(
+        device_id: Option<String>,
+        token_saver: bool,
+        output: tokio_mpsc::Sender<Vec<u8>>,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let (event_sender, events) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         let join = std::thread::spawn(move || {
-            if let Err(error) =
-                run_capture(device_id.as_deref(), output, &worker_stop, &event_sender)
-            {
+            if let Err(error) = run_capture(
+                device_id.as_deref(),
+                token_saver,
+                output,
+                &worker_stop,
+                &event_sender,
+            ) {
                 let _ = event_sender.try_send(AudioTaskEvent::Failed(NoticeText::bounded(
                     &error.to_string(),
                 )));
@@ -178,6 +218,7 @@ impl Drop for NativeAudioTask {
 
 fn run_capture(
     device_id: Option<&str>,
+    token_saver: bool,
     output: tokio_mpsc::Sender<Vec<u8>>,
     stop: &AtomicBool,
     events: &SyncSender<AudioTaskEvent>,
@@ -236,7 +277,7 @@ fn run_capture(
     events
         .try_send(AudioTaskEvent::Ready)
         .map_err(|_| anyhow!("音频状态队列不可用"))?;
-    let mut framer = PcmFramer::new(sample_rate, channels);
+    let mut framer = PcmFramer::new(sample_rate, channels, token_saver);
     while !stop.load(Ordering::Acquire) {
         match raw_receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(RawEvent::Data(chunk)) => framer.push(&chunk.samples, &output),
@@ -294,10 +335,27 @@ mod tests {
         assert!((1_598..=1_601).contains(&expected.len()));
     }
 
+    #[test]
+    fn swr_naudio_004_token_saver_preserves_hangover_and_resumes_on_speech() {
+        let silence = vec![0.0; PCM_FRAME_SAMPLES];
+        let speech = vec![0.02; PCM_FRAME_SAMPLES];
+        let mut gate = SilenceGate::default();
+        for _ in 0..SILENCE_HANGOVER_FRAMES {
+            assert!(gate.should_send(&silence, true));
+        }
+        assert!(!gate.should_send(&silence, true));
+        assert!(gate.should_send(&speech, true));
+        assert!(gate.should_send(&silence, true));
+        let mut disabled = SilenceGate::default();
+        for _ in 0..100 {
+            assert!(disabled.should_send(&silence, false));
+        }
+    }
+
     #[tokio::test]
     async fn swr_naudio_002_framer_emits_exact_bounded_pcm_frames() {
         let (sender, mut receiver) = tokio_mpsc::channel(2);
-        let mut framer = PcmFramer::new(PCM_SAMPLE_RATE, 1);
+        let mut framer = PcmFramer::new(PCM_SAMPLE_RATE, 1, false);
         framer.push(&vec![0.5; PCM_FRAME_SAMPLES + 1], &sender);
         let frame = receiver.recv().await.expect("PCM frame");
         assert_eq!(frame.len(), PCM_FRAME_BYTES);

@@ -70,6 +70,7 @@
 | SWR-NAUDIO-001 | `NativeAudioTask`、setupComplete 后启动、音频/传输取消顺序 | 原生端口状态测试、生命周期代码评审；真机待办 `ASSURANCE-TARGET-003` |
 | SWR-NAUDIO-002 | CPAL 回调有界 `sync_channel(12)`、工作线程 `Resampler`/`PcmFramer` | `swr_naudio_001_resampling_is_chunk_boundary_independent`、回调代码评审 |
 | SWR-NAUDIO-003 | `PCM_QUEUE_FRAMES=6`、16 kHz/640 样本/PCM16 | `swr_naudio_002_framer_emits_exact_bounded_pcm_frames` |
+| SWR-NAUDIO-004 | `SilenceGate`、RMS 阈值、25 个 40 ms hangover 帧 | `swr_naudio_004_token_saver_preserves_hangover_and_resumes_on_speech` |
 | SWR-NPLAY-001 | `NativePlaybackTask`、`playback_required` 双就绪门及失败回滚 | `swr_nport_003_worker_events_map_to_typed_ui_lifecycle`、真机待办 `ASSURANCE-TARGET-004` |
 | SWR-NPLAY-002 | 固定 12 项 `Command` 队列、播放工作线程重采样、CPAL `try_lock` 回调 | `swr_nplay_001_resampler_is_chunk_boundary_independent`、回调代码评审 |
 | SWR-NPLAY-003 | 原子 epoch、`clear`、480 ms 样本上限及 `Zeroize` | `swr_nplay_002_clear_invalidates_queued_audio_immediately`、代码评审 |

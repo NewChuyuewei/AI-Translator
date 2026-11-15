@@ -128,6 +128,7 @@ pub struct NativeSessionPort {
     playback_required: bool,
     microphone_ready: bool,
     playback_ready: bool,
+    token_saver: bool,
 }
 
 impl NativeSessionPort {
@@ -142,6 +143,7 @@ impl NativeSessionPort {
                 self.events.push(UiEvent::Status(self.status.clone()));
                 self.audio = Some(NativeAudioTask::spawn(
                     self.microphone_device.clone(),
+                    self.token_saver,
                     task.audio_sender(),
                 ));
                 if self.playback_required {
@@ -294,6 +296,7 @@ impl SessionPort for NativeSessionPort {
         self.playback_required = options.play_translation();
         self.microphone_ready = false;
         self.playback_ready = !self.playback_required;
+        self.token_saver = options.token_saver;
         self.task = Some(TransportTask::spawn(options.clone()));
         Ok(())
     }
