@@ -4590,6 +4590,7 @@ dependencies = [
  "slint",
  "slint-build",
  "translator-core",
+ "zeroize",
 ]
 
 [[package]]
