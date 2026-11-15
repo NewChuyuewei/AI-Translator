@@ -16,7 +16,7 @@ use tokio::{
     net::TcpStream,
 };
 use tokio_tungstenite::{
-    client_async_tls_with_config,
+    MaybeTlsStream, WebSocketStream, client_async_tls_with_config,
     tungstenite::{
         Error as WsError, Message, client::IntoClientRequest, http::HeaderValue,
         protocol::WebSocketConfig,
@@ -32,7 +32,7 @@ use translator_core::{
         parse_socks_reply_prefix, socks_auth_request, socks_connect_request, socks_greeting,
         socks_reply_tail_len,
     },
-    server_protocol::{DataFrameKind, MAX_SERVER_MESSAGE_BYTES},
+    server_protocol::{DataFrameKind, MAX_SERVER_MESSAGE_BYTES, ParsedMessage},
     session_driver::{DriverEvent, SessionDriver},
 };
 
@@ -47,14 +47,46 @@ pub struct ProbeReport {
 
 pub type ProbeCancel = Arc<AtomicBool>;
 
-pub fn probe_blocking(options: SessionOptions, cancel: ProbeCancel) -> Result<ProbeReport> {
+#[derive(Debug, PartialEq, Eq)]
+pub enum SessionTransportEvent {
+    SetupComplete,
+    Message(ParsedMessage),
+}
+
+pub fn session_blocking(
+    options: SessionOptions,
+    cancel: ProbeCancel,
+    mut publish: impl FnMut(SessionTransportEvent),
+) -> Result<&'static str> {
     options.validate()?;
     let route = resolve_route(options.proxy_mode, &options.proxy_url, &cancel)?;
+    let route_label = route.label();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("无法启动原生网络运行时")?;
-    runtime.block_on(probe_endpoint(options, route, ENDPOINT, cancel))
+    runtime.block_on(session_endpoint(
+        options,
+        route,
+        ENDPOINT,
+        cancel,
+        &mut publish,
+    ))?;
+    Ok(route_label)
+}
+
+pub fn probe_blocking(options: SessionOptions, cancel: ProbeCancel) -> Result<ProbeReport> {
+    let started = Instant::now();
+    let callback_cancel = Arc::clone(&cancel);
+    let route_label = session_blocking(options, cancel, move |event| {
+        if matches!(event, SessionTransportEvent::SetupComplete) {
+            callback_cancel.store(true, Ordering::Release);
+        }
+    })?;
+    Ok(ProbeReport {
+        route_label,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
 }
 
 fn resolve_route(mode: ProxyMode, address: &str, cancel: &ProbeCancel) -> Result<ProxyRoute> {
@@ -103,13 +135,14 @@ fn resolve_automatic_route() -> Result<ProxyRoute> {
     ProxyRoute::automatic_resolver_value(&selected)
 }
 
-async fn probe_endpoint(
-    options: SessionOptions,
-    route: ProxyRoute,
+type NativeSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+async fn establish_session(
+    options: &SessionOptions,
+    route: &ProxyRoute,
     endpoint: &str,
-    cancel: ProbeCancel,
-) -> Result<ProbeReport> {
-    let started = Instant::now();
+    cancel: &ProbeCancel,
+) -> Result<(NativeSocket, SessionDriver)> {
     let mut request = endpoint
         .into_client_request()
         .context("无效的 WebSocket 地址")?;
@@ -123,10 +156,8 @@ async fn probe_endpoint(
         .ok_or_else(|| anyhow!("WebSocket 目标缺少主机"))?
         .to_owned();
     let port = request.uri().port_u16().unwrap_or(443);
-    let route_label = route.label();
-
     let handshake = async {
-        let tcp = open_route(&route, &host, port).await?;
+        let tcp = open_route(route, &host, port).await?;
         let mut websocket = WebSocketConfig::default();
         websocket.max_message_size = Some(MAX_SERVER_MESSAGE_BYTES);
         websocket.max_frame_size = Some(MAX_SERVER_MESSAGE_BYTES);
@@ -143,17 +174,9 @@ async fn probe_endpoint(
         result = tokio::time::timeout(Duration::from_secs(25), handshake) => {
             result.map_err(|_| anyhow!("连接 Gemini 超时；请检查网络和代理"))??
         }
-        () = cancelled(&cancel) => return Err(anyhow!("网络验证已取消")),
+        () = cancelled(cancel) => return Err(anyhow!("原生网络任务已取消")),
     };
-
-    let config = LiveProtocolConfig {
-        model: options.model,
-        thinking_level: options.thinking_level,
-        transcription_mode: options.transcription_mode,
-        target_language: options.target_language.clone(),
-        bidirectional: options.bidirectional,
-        other_language: options.other_language.clone(),
-    };
+    let config = LiveProtocolConfig::from(options);
     let mut driver = SessionDriver::new(&config);
     let setup = driver.setup_message().to_owned();
     tokio::select! {
@@ -165,9 +188,8 @@ async fn probe_endpoint(
                 .map_err(|_| anyhow!("发送 setup 超时"))?
                 .map_err(|error| anyhow!("发送 setup 失败：{}", describe_ws_error(&error)))?;
         }
-        () = cancelled(&cancel) => return Err(anyhow!("网络验证已取消")),
+        () = cancelled(cancel) => return Err(anyhow!("原生网络任务已取消")),
     }
-
     let setup_wait = async {
         while let Some(message) = socket.next().await {
             let message = message.map_err(|error| {
@@ -176,19 +198,8 @@ async fn probe_endpoint(
                     describe_ws_error(&error)
                 )
             })?;
-            let event = match message {
-                Message::Text(text) => driver.receive(DataFrameKind::Text, text.as_bytes())?,
-                Message::Binary(bytes) => driver.receive(DataFrameKind::Binary, &bytes)?,
-                Message::Close(_) => return Err(anyhow!("Gemini 在 setupComplete 前关闭了连接")),
-                Message::Ping(value) => {
-                    socket.send(Message::Pong(value)).await.map_err(|error| {
-                        anyhow!("回复 WebSocket Ping 失败：{}", describe_ws_error(&error))
-                    })?;
-                    continue;
-                }
-                Message::Pong(_) | Message::Frame(_) => continue,
-            };
-            if matches!(event, DriverEvent::SetupComplete) {
+            let event = receive_message(&mut socket, &mut driver, message).await?;
+            if matches!(event, Some(DriverEvent::SetupComplete)) {
                 return Ok(());
             }
         }
@@ -198,19 +209,91 @@ async fn probe_endpoint(
         result = tokio::time::timeout(Duration::from_secs(25), setup_wait) => {
             result.map_err(|_| anyhow!("等待 Gemini setupComplete 超时"))??;
         }
-        () = cancelled(&cancel) => return Err(anyhow!("网络验证已取消")),
+        () = cancelled(cancel) => return Err(anyhow!("原生网络任务已取消")),
     }
+    Ok((socket, driver))
+}
 
+async fn receive_message(
+    socket: &mut NativeSocket,
+    driver: &mut SessionDriver,
+    message: Message,
+) -> Result<Option<DriverEvent>> {
+    match message {
+        Message::Text(text) => driver
+            .receive(DataFrameKind::Text, text.as_bytes())
+            .map(Some),
+        Message::Binary(bytes) => driver.receive(DataFrameKind::Binary, &bytes).map(Some),
+        Message::Close(_) => Err(anyhow!("Gemini 已关闭连接")),
+        Message::Ping(value) => {
+            socket.send(Message::Pong(value)).await.map_err(|error| {
+                anyhow!("回复 WebSocket Ping 失败：{}", describe_ws_error(&error))
+            })?;
+            Ok(None)
+        }
+        Message::Pong(_) | Message::Frame(_) => Ok(None),
+    }
+}
+
+async fn close_session(socket: &mut NativeSocket, driver: &mut SessionDriver) -> Result<()> {
     let end = driver.close()?;
-    socket
-        .send(Message::Text(end.into()))
-        .await
-        .map_err(|error| anyhow!("发送流结束失败：{}", describe_ws_error(&error)))?;
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        socket.send(Message::Text(end.into())),
+    )
+    .await
+    .map_err(|_| anyhow!("发送流结束超时"))?
+    .map_err(|error| anyhow!("发送流结束失败：{}", describe_ws_error(&error)))?;
     let _ = socket.close(None).await;
+    Ok(())
+}
+
+#[cfg(test)]
+async fn probe_endpoint(
+    options: SessionOptions,
+    route: ProxyRoute,
+    endpoint: &str,
+    cancel: ProbeCancel,
+) -> Result<ProbeReport> {
+    let started = Instant::now();
+    let route_label = route.label();
+    let (mut socket, mut driver) = establish_session(&options, &route, endpoint, &cancel).await?;
+    close_session(&mut socket, &mut driver).await?;
     Ok(ProbeReport {
         route_label,
         elapsed_ms: started.elapsed().as_millis(),
     })
+}
+
+async fn session_endpoint(
+    options: SessionOptions,
+    route: ProxyRoute,
+    endpoint: &str,
+    cancel: ProbeCancel,
+    publish: &mut dyn FnMut(SessionTransportEvent),
+) -> Result<()> {
+    let (mut socket, mut driver) = establish_session(&options, &route, endpoint, &cancel).await?;
+    publish(SessionTransportEvent::SetupComplete);
+    loop {
+        tokio::select! {
+            message = socket.next() => {
+                let message = message
+                    .ok_or_else(|| anyhow!("Gemini 已关闭连接"))?
+                    .map_err(|error| anyhow!("Gemini 会话连接失败：{}", describe_ws_error(&error)))?;
+                match receive_message(&mut socket, &mut driver, message).await? {
+                    Some(DriverEvent::Message(message)) => {
+                        publish(SessionTransportEvent::Message(message));
+                    }
+                    Some(DriverEvent::SetupComplete) => {
+                        return Err(anyhow!("收到重复的 setupComplete"));
+                    }
+                    Some(DriverEvent::Metadata(_)) | None => {}
+                }
+            }
+            () = cancelled(&cancel) => break,
+        }
+    }
+    close_session(&mut socket, &mut driver).await
 }
 
 async fn cancelled(cancel: &ProbeCancel) {
@@ -435,7 +518,76 @@ mod tests {
         .await
         .expect_err("probe must cancel")
         .to_string();
-        assert_eq!(error, "网络验证已取消");
+        assert_eq!(error, "原生网络任务已取消");
         server.await.expect("server fixture");
+    }
+
+    #[tokio::test]
+    async fn swr_ntrans_006_session_forwards_messages_and_stops_once() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.expect("accept fixture");
+            let mut socket = tokio_tungstenite::accept_async(tcp)
+                .await
+                .expect("WebSocket fixture");
+            let setup = socket.next().await.expect("setup frame").expect("setup");
+            assert!(matches!(setup, Message::Text(_)));
+            socket
+                .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
+                .await
+                .expect("setup complete");
+            socket
+                .send(Message::Text(
+                    r#"{"serverContent":{"inputTranscription":{"text":"hello"},"outputTranscription":{"text":"你好"}}}"#.into(),
+                ))
+                .await
+                .expect("caption");
+            let end = socket.next().await.expect("end frame").expect("end");
+            let Message::Text(end) = end else {
+                panic!("expected end text")
+            };
+            assert_eq!(end.as_str(), r#"{"realtimeInput":{"audioStreamEnd":true}}"#);
+            assert!(matches!(
+                socket.next().await,
+                Some(Ok(Message::Close(_))) | None
+            ));
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let callback_cancel = Arc::clone(&cancel);
+        let mut events = Vec::new();
+        session_endpoint(
+            options(),
+            ProxyRoute::explicit_direct(),
+            &format!("ws://{address}"),
+            cancel,
+            &mut |event| {
+                if matches!(event, SessionTransportEvent::Message(_)) {
+                    callback_cancel.store(true, Ordering::Release);
+                }
+                events.push(event);
+            },
+        )
+        .await
+        .expect("session fixture");
+        server.await.expect("server fixture");
+        assert!(matches!(
+            events.first(),
+            Some(SessionTransportEvent::SetupComplete)
+        ));
+        let Some(SessionTransportEvent::Message(message)) = events.get(1) else {
+            panic!("expected parsed session message")
+        };
+        assert_eq!(
+            message.input.as_ref().map(|value| value.0.as_str()),
+            Some("hello")
+        );
+        assert_eq!(
+            message.output.as_ref().map(|value| value.0.as_str()),
+            Some("你好")
+        );
+        assert_eq!(events.len(), 2);
     }
 }
