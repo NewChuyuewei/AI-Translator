@@ -1,15 +1,15 @@
 import fs from 'node:fs';
+import { parseVersion } from './version-utils.mjs';
 
 const version = process.argv[2];
-const match = version?.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
-if (!match) {
-  console.error('Usage: node scripts/set-version.mjs <major.minor.patch>');
+let parsed;
+try {
+  parsed = parseVersion(version);
+} catch (error) {
+  console.error(`Usage: node scripts/set-version.mjs <major.minor.patch[-alpha|beta|rc.number]>\n${error.message}`);
   process.exit(2);
 }
-const versionCode = Number(match[1]) * 1_000_000 + Number(match[2]) * 1_000 + Number(match[3]);
-if (!Number.isSafeInteger(versionCode) || versionCode > 2_100_000_000) {
-  throw new Error('Version is too large for Android versionCode');
-}
+const { fileVersion, versionCode } = parsed;
 
 function json(path, update) {
   const value = JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -41,6 +41,7 @@ for (const crate of [
   );
 }
 replace('packaging/windows-installer.nsi', /!define PRODUCT_VERSION "[^"]+"/, `!define PRODUCT_VERSION "${version}"`, 'NSIS product version');
+replace('packaging/windows-installer.nsi', /!define PRODUCT_FILE_VERSION "[^"]+"/, `!define PRODUCT_FILE_VERSION "${fileVersion}"`, 'NSIS numeric file version');
 replace('packaging/windows-portable-readme.txt', /^Gemini Live Translator [^ ]+/m, `Gemini Live Translator ${version}`, 'portable package version');
 
 console.log(`Application build version set to ${version}`);

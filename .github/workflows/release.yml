@@ -1,32 +1,42 @@
-name: Native Slint build and release
+name: Native build and controlled release
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Custom release tag (vMAJOR.MINOR.PATCH)
+        description: vMAJOR.MINOR.PATCH, or vMAJOR.MINOR.PATCH-(alpha|beta|rc).N for prerelease
         required: true
+        default: v1.1.0
         type: string
       release_mode:
-        description: Build artifacts only or publish after all target evidence gates pass
+        description: Build artifacts, publish a validation prerelease, or publish an evidence-gated release
         required: true
         default: build_only
         type: choice
         options: [build_only, prerelease, release]
+      build_target:
+        description: Platforms to build (production release requires all)
+        required: true
+        default: all
+        type: choice
+        options: [all, desktop, windows, macos, linux, android]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: native-release-${{ github.ref }}-${{ inputs.release_mode }}-${{ inputs.build_target }}
   cancel-in-progress: false
 
 jobs:
   preflight:
-    name: Select controlled source commit
+    name: Validate selection and source commit
     runs-on: ubuntu-24.04
     outputs:
-      build_commit: ${{ steps.source.outputs.build_commit }}
+      build_commit: ${{ steps.control.outputs.build_commit }}
+      desktop_enabled: ${{ steps.control.outputs.desktop_enabled }}
+      desktop_matrix: ${{ steps.control.outputs.desktop_matrix }}
+      android_enabled: ${{ steps.control.outputs.android_enabled }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -34,42 +44,88 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - id: source
-        name: Validate evidence and select source
+      - id: control
+        name: Resolve build plan
         shell: bash
+        env:
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUILD_TARGET: ${{ inputs.build_target }}
         run: |
-          if [[ "${{ inputs.release_mode }}" == "build_only" ]]; then
-            build_commit="$GITHUB_SHA"
-          else
-            if ! build_commit="$(node scripts/check-target-evidence.mjs --require-complete --print-commit 2>/dev/null)"; then
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ "$RELEASE_TAG" != "v${version}" ]]; then
+            echo "::error title=Invalid release tag::Tag must start with v."
+            exit 1
+          fi
+          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          candidate='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(alpha|beta|rc)\.(0|[1-9][0-9]*)$'
+          if [[ "$RELEASE_MODE" == "release" && ! "$version" =~ $stable ]]; then
+            echo "::error title=Invalid production version::release requires vMAJOR.MINOR.PATCH without a prerelease suffix."
+            exit 1
+          fi
+          if [[ "$RELEASE_MODE" == "prerelease" && ! "$version" =~ $candidate ]]; then
+            echo "::error title=Invalid validation version::prerelease requires vMAJOR.MINOR.PATCH-(alpha|beta|rc).N, for example v2.1.0-rc.1."
+            exit 1
+          fi
+          if [[ "$RELEASE_MODE" == "build_only" && ! "$version" =~ $stable && ! "$version" =~ $candidate ]]; then
+            echo "::error title=Invalid build version::Use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(alpha|beta|rc).N."
+            exit 1
+          fi
+
+          if [[ "$RELEASE_MODE" == "release" ]]; then
+            if [[ "$BUILD_TARGET" != "all" ]]; then
+              echo "::error title=Incomplete production build::Production release requires build_target=all."
+              exit 1
+            fi
+            if ! build_commit="$(node scripts/check-target-evidence.mjs --require-complete --version "$version" --print-commit 2>/dev/null)"; then
               evidence_status="$(node scripts/check-target-evidence.mjs 2>&1 || true)"
               safe_status="${evidence_status//'%'/'%25'}"
               safe_status="${safe_status//$'\r'/'%0D'}"
               safe_status="${safe_status//$'\n'/'%0A'}"
-              echo "::error title=Target validation evidence is incomplete::${safe_status}. Prerelease and release publication are intentionally blocked. Select build_only to create candidate artifacts without publishing."
+              echo "::error title=Production target evidence is incomplete::${safe_status}. Use prerelease with an alpha/beta/rc tag for target validation, or build_only for private artifacts."
               exit 1
             fi
             git cat-file -e "${build_commit}^{commit}"
+          else
+            build_commit="$GITHUB_SHA"
           fi
-          echo "build_commit=${build_commit}" >> "$GITHUB_OUTPUT"
+
+          all_matrix='{"include":[{"os":"windows-2022","label":"Windows x64","artifact":"windows-x64"},{"os":"macos-15","label":"macOS Apple Silicon","artifact":"macos-arm64"},{"os":"ubuntu-24.04","label":"Linux x64 auxiliary","artifact":"linux-x64"}]}'
+          windows_matrix='{"include":[{"os":"windows-2022","label":"Windows x64","artifact":"windows-x64"}]}'
+          macos_matrix='{"include":[{"os":"macos-15","label":"macOS Apple Silicon","artifact":"macos-arm64"}]}'
+          linux_matrix='{"include":[{"os":"ubuntu-24.04","label":"Linux x64 auxiliary","artifact":"linux-x64"}]}'
+          case "$BUILD_TARGET" in
+            all|desktop) desktop_enabled=true; desktop_matrix="$all_matrix" ;;
+            windows) desktop_enabled=true; desktop_matrix="$windows_matrix" ;;
+            macos) desktop_enabled=true; desktop_matrix="$macos_matrix" ;;
+            linux) desktop_enabled=true; desktop_matrix="$linux_matrix" ;;
+            android) desktop_enabled=false; desktop_matrix="$linux_matrix" ;;
+            *) echo "::error title=Unknown build target::$BUILD_TARGET"; exit 1 ;;
+          esac
+          if [[ "$BUILD_TARGET" == "all" || "$BUILD_TARGET" == "android" ]]; then android_enabled=true; else android_enabled=false; fi
+
+          echo "build_commit=$build_commit" >> "$GITHUB_OUTPUT"
+          echo "desktop_enabled=$desktop_enabled" >> "$GITHUB_OUTPUT"
+          echo "desktop_matrix=$desktop_matrix" >> "$GITHUB_OUTPUT"
+          echo "android_enabled=$android_enabled" >> "$GITHUB_OUTPUT"
+          echo "### Controlled build plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: \`$RELEASE_MODE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: \`$version\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target selection: \`$BUILD_TARGET\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source commit: \`$build_commit\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$RELEASE_MODE" == "prerelease" ]]; then
+            echo "- Validation candidate only; no physical-target acceptance is claimed." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   desktop:
     name: Native Slint · ${{ matrix.label }}
+    if: needs.preflight.outputs.desktop_enabled == 'true'
+    needs: preflight
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-2022
-            label: Windows x64
-            artifact: windows-x64
-          - os: macos-15
-            label: macOS Apple Silicon
-            artifact: macos-arm64
-          - os: ubuntu-24.04
-            label: Linux x64 auxiliary
-            artifact: linux-x64
+      matrix: ${{ fromJSON(needs.preflight.outputs.desktop_matrix) }}
     runs-on: ${{ matrix.os }}
-    needs: preflight
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
@@ -85,7 +141,6 @@ jobs:
         shell: bash
         run: |
           VERSION="${RELEASE_TAG#v}"
-          test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Release tag must use vMAJOR.MINOR.PATCH"; exit 1; }
           node scripts/set-version.mjs "$VERSION"
           node scripts/check-version.mjs
           node scripts/check-no-legacy-desktop.mjs
@@ -141,10 +196,12 @@ jobs:
         shell: bash
         run: |
           VERSION="${RELEASE_TAG#v}"
+          BASE_VERSION="${VERSION%%-*}"
           APP="$RUNNER_TEMP/Gemini Live Translator.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" release-assets
           cp target/release/gemini-live-translator "$APP/Contents/MacOS/gemini-live-translator"
-          sed "s/__VERSION__/${VERSION}/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+          sed -e "s/__SHORT_VERSION__/${BASE_VERSION}/g" -e "s/__BUILD_VERSION__/${BASE_VERSION}/g" \
+            packaging/macos/Info.plist > "$APP/Contents/Info.plist"
           cp COPYRIGHT "$APP/Contents/Resources/COPYRIGHT.txt"
           plutil -lint "$APP/Contents/Info.plist"
           codesign --force --deep --sign - --entitlements packaging/macos/Entitlements.plist "$APP"
@@ -171,8 +228,9 @@ jobs:
 
   android:
     name: Native Android Kotlin debug APK
-    runs-on: ubuntu-24.04
+    if: needs.preflight.outputs.android_enabled == 'true'
     needs: preflight
+    runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
@@ -192,11 +250,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: 9.9.1
-      - name: Apply custom release version
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          test "${RELEASE_TAG}" = "v${VERSION}" || exit 1
-          node scripts/set-version.mjs "$VERSION"
+      - name: Apply controlled version
+        run: node scripts/set-version.mjs "${RELEASE_TAG#v}"
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
       - name: Test and build native Android APK
@@ -214,8 +269,12 @@ jobs:
           retention-days: 14
 
   publish:
-    name: Evidence-gated GitHub release
-    if: inputs.release_mode != 'build_only'
+    name: Publish selected GitHub release
+    if: >-
+      always() && inputs.release_mode != 'build_only' &&
+      needs.preflight.result == 'success' &&
+      (needs.desktop.result == 'success' || needs.desktop.result == 'skipped') &&
+      (needs.android.result == 'success' || needs.android.result == 'skipped')
     needs: [preflight, desktop, android]
     runs-on: ubuntu-24.04
     permissions:
@@ -223,33 +282,51 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
       RELEASE_MODE: ${{ inputs.release_mode }}
+      BUILD_COMMIT: ${{ needs.preflight.outputs.build_commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Reconfirm physical-target evidence source commit
+      - name: Reconfirm production target evidence
+        if: inputs.release_mode == 'release'
         run: |
-          tested_commit="$(node scripts/check-target-evidence.mjs --require-complete --print-commit)"
-          test "$tested_commit" = "${{ needs.preflight.outputs.build_commit }}"
+          tested_commit="$(node scripts/check-target-evidence.mjs --require-complete --version "${RELEASE_TAG#v}" --print-commit)"
+          test "$tested_commit" = "$BUILD_COMMIT"
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
-      - name: Create checksums
+      - name: Prepare release manifest
+        shell: bash
         run: |
           cd release-assets
-          sha256sum * > SHA256SUMS.txt
+          if [[ "$RELEASE_MODE" == "release" ]]; then
+            rm -f *-native-android-debug.apk
+          fi
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort | xargs -r sha256sum > SHA256SUMS.txt
+          test -s SHA256SUMS.txt
       - name: Create or update release
         shell: bash
         run: |
-          flags=(--title "Gemini Live Translator ${RELEASE_TAG}" --generate-notes --target "${{ needs.preflight.outputs.build_commit }}")
-          prerelease=false
-          if [[ "${RELEASE_MODE}" == "prerelease" ]]; then flags+=(--prerelease); prerelease=true; fi
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release edit "${RELEASE_TAG}" --title "Gemini Live Translator ${RELEASE_TAG}" --target "${{ needs.preflight.outputs.build_commit }}" --prerelease="${prerelease}"
-            gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+          if [[ "$RELEASE_MODE" == "prerelease" ]]; then
+            title="Gemini Live Translator ${RELEASE_TAG} · validation candidate"
+            notes=$'VALIDATION CANDIDATE — NOT A PRODUCTION RELEASE\n\nPhysical Windows/macOS target acceptance is incomplete. This prerelease exists only to collect controlled target evidence. CI and packaging success do not establish production readiness.'
+            prerelease=true
           else
-            gh release create "${RELEASE_TAG}" release-assets/* "${flags[@]}"
+            title="Gemini Live Translator ${RELEASE_TAG}"
+            notes=""
+            prerelease=false
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            args=("$RELEASE_TAG" --title "$title" --target "$BUILD_COMMIT" --prerelease="$prerelease")
+            if [[ -n "$notes" ]]; then args+=(--notes "$notes"); fi
+            gh release edit "${args[@]}"
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            args=("$RELEASE_TAG" release-assets/* --title "$title" --target "$BUILD_COMMIT")
+            if [[ "$prerelease" == true ]]; then args+=(--prerelease --notes "$notes"); else args+=(--generate-notes); fi
+            gh release create "${args[@]}"
           fi

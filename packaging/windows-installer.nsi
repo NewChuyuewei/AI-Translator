@@ -13,6 +13,7 @@ RequestExecutionLevel user
 
 !define PRODUCT_NAME "Gemini Live Translator"
 !define PRODUCT_VERSION "1.1.0"
+!define PRODUCT_FILE_VERSION "1.1.0.0"
 !define PRODUCT_PUBLISHER "chuyuewei"
 !define PRODUCT_COPYRIGHT "Copyright © 2026 chuyuewei. All rights reserved."
 !define APP_EXE "Gemini-Live-Translator.exe"
@@ -20,7 +21,7 @@ RequestExecutionLevel user
 
 Name "${PRODUCT_NAME}"
 OutFile "${OUTPUT_FILE}"
-VIProductVersion "${PRODUCT_VERSION}.0"
+VIProductVersion "${PRODUCT_FILE_VERSION}"
 VIAddVersionKey /LANG=2052 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=2052 "ProductVersion" "${PRODUCT_VERSION}"
 VIAddVersionKey /LANG=2052 "CompanyName" "${PRODUCT_PUBLISHER}"

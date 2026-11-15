@@ -1,6 +1,8 @@
 import fs from 'node:fs';
+import { parseVersion } from './version-utils.mjs';
 
 const packageVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+const parsedVersion = parseVersion(packageVersion);
 const found = new Map([['release metadata', packageVersion]]);
 const capture = (name, path, pattern) => {
   const match = fs.readFileSync(path, 'utf8').match(pattern);
@@ -11,6 +13,11 @@ const capture = (name, path, pattern) => {
 capture('Cargo workspace / Slint desktop', 'Cargo.toml', /\[workspace\.package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/);
 capture('native Android', 'android/app/build.gradle.kts', /versionName\s*=\s*"([^"]+)"/);
 capture('Windows installer', 'packaging/windows-installer.nsi', /PRODUCT_VERSION "([^"]+)"/);
+const installer = fs.readFileSync('packaging/windows-installer.nsi', 'utf8');
+const fileVersion = installer.match(/PRODUCT_FILE_VERSION "([^"]+)"/)?.[1];
+if (fileVersion !== parsedVersion.fileVersion) {
+  throw new Error(`Windows numeric file version mismatch: expected ${parsedVersion.fileVersion}, got ${fileVersion || 'missing'}`);
+}
 capture('Windows portable readme', 'packaging/windows-portable-readme.txt', /^Gemini Live Translator ([^ ]+)/m);
 
 const workspaceCrates = [
