@@ -24,6 +24,10 @@
 | SWR-PORT-002 | `SessionPort`、`MemorySessionPort`、Slint `PendingNativeSessionPort` | `swr_port_002_memory_port_enforces_lifecycle_and_publishes_typed_events` |
 | SWR-PORT-003 | `UiEvent`、`CaptionSnapshot::bounded`、`NoticeText` | `swr_port_003_ui_text_is_bounded_and_contains_no_pcm_variant` |
 | SWR-PORT-004 | `MemorySessionPort::start` 的模型状态约束 | `swr_port_004_transcription_mode_never_emits_translation_playback_state` |
+| SWR-DIAG-001 | `diagnostics::DiagnosticStore` | `swr_diag_001_store_is_bounded_monotonic_and_clearable`、前端水位线 mock 测试 |
+| SWR-DIAG-002 | `diagnostics::Redactor::new`、`Drop` | `swr_diag_002_redactor_masks_encoded_and_decoded_credentials`、旧 WebSocket 日志测试 |
+| SWR-DIAG-003 | `sanitize_message`、`redact_secret` | `swr_diag_003_messages_are_bounded_and_short_tokens_do_not_garble_words` |
+| SWR-DIAG-004 | `LogLevel`、`LogEntry`、Tauri `Trace` 适配器 | `swr_diag_004_level_serialization_remains_frontend_compatible`、UI mock 测试 |
 
 ## 开放验证项
 

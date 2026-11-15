@@ -4367,6 +4367,7 @@ version = "1.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "percent-encoding",
  "serde",
  "serde_json",
  "url",
