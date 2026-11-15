@@ -4,10 +4,38 @@
 
 slint::include_modules!();
 
+use anyhow::anyhow;
 use slint::ComponentHandle;
+use std::{cell::RefCell, rc::Rc};
 use translator_core::{
-    AudioSourceMode, ModelKind, ProxyMode, SessionOptions, ThinkingLevel, TranscriptionMode,
+    AudioSourceMode, ModelKind, ProxyMode, SessionOptions, SessionPhase, ThinkingLevel,
+    TranscriptionMode,
+    session_port::{SessionPort, UiEvent},
 };
+
+/// v2.1.0 migration boundary: the shell uses the final typed port now, while
+/// the real socket/audio runtime remains disabled until its adapter is proven.
+#[derive(Default)]
+struct PendingNativeSessionPort;
+
+impl SessionPort for PendingNativeSessionPort {
+    fn start(&mut self, options: &SessionOptions) -> anyhow::Result<()> {
+        options.validate()?;
+        Err(anyhow!("原生会话适配器尚未完成验证；未采集或上传任何音频"))
+    }
+
+    fn stop(&mut self) -> anyhow::Result<()> {
+        Err(anyhow!("原生会话当前未运行"))
+    }
+
+    fn phase(&self) -> SessionPhase {
+        SessionPhase::Idle
+    }
+
+    fn poll_event(&mut self) -> Option<UiEvent> {
+        None
+    }
+}
 
 fn selected<T: Copy>(index: i32, values: &[T], safe_default: T) -> T {
     values
@@ -73,14 +101,17 @@ fn main() -> Result<(), slint::PlatformError> {
     let caption = CaptionWindow::new()?;
     caption.show()?;
 
+    let session = Rc::new(RefCell::new(PendingNativeSessionPort));
     let weak = control.as_weak();
+    let callback_session = Rc::clone(&session);
     control.on_start_stop(move || {
-        let Some(ui) = weak.upgrade() else { return; };
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
         let options = options_from_ui(&ui);
-        match options.validate() {
-            Ok(()) => ui.set_status_message(
-                "配置校验通过。Slint 原生窗口已运行；会话、设备与保险库适配器仍在迁移中，当前不会采集或上传音频。".into()
-            ),
+        let result = callback_session.borrow_mut().start(&options);
+        match result {
+            Ok(()) => ui.set_status_message("原生会话已启动".into()),
             Err(error) => ui.set_status_message(error.to_string().into()),
         }
     });

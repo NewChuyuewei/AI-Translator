@@ -12,6 +12,7 @@ use zeroize::Zeroize;
 pub mod protocol;
 pub mod server_protocol;
 pub mod session_driver;
+pub mod session_port;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

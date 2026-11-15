@@ -20,6 +20,10 @@
 | SWR-SESSION-001 | `session_driver::SessionDriver`、`DriverEvent` | `swr_session_001_memory_session_runs_without_ui_or_socket` |
 | SWR-SESSION-002 | `SessionDriver::receive`、`encode_audio` | `swr_session_002_rejects_out_of_order_and_duplicate_events` |
 | SWR-SESSION-003 | `SessionDriver::close`、`DriverState::Closed` | `swr_session_003_close_is_deterministic_and_idempotence_is_rejected` |
+| SWR-PORT-001 | `BoundedEventQueue<T, CAPACITY>` | `swr_port_001_queue_is_bounded_and_freshness_first` |
+| SWR-PORT-002 | `SessionPort`、`MemorySessionPort`、Slint `PendingNativeSessionPort` | `swr_port_002_memory_port_enforces_lifecycle_and_publishes_typed_events` |
+| SWR-PORT-003 | `UiEvent`、`CaptionSnapshot::bounded`、`NoticeText` | `swr_port_003_ui_text_is_bounded_and_contains_no_pcm_variant` |
+| SWR-PORT-004 | `MemorySessionPort::start` 的模型状态约束 | `swr_port_004_transcription_mode_never_emits_translation_playback_state` |
 
 ## 开放验证项
 
