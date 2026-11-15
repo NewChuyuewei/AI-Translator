@@ -278,7 +278,7 @@ fn run_playback(
     Ok(())
 }
 
-fn build_output<T: cpal::SizedSample + Copy>(
+fn build_output<T: cpal::SizedSample + Copy + Send + 'static>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     channels: usize,
