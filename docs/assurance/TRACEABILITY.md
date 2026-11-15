@@ -64,9 +64,12 @@
 | SWR-NTRANS-005 | `ProbeCancel`、分阶段 `tokio::select!`、可取消平台代理等待 | `swr_ntrans_005_setup_wait_is_cancellable`、退出回调代码评审 |
 | SWR-NTRANS-006 | `session_blocking`、共享 `establish_session`/`receive_message`/`close_session` | `swr_ntrans_006_and_007_session_sends_audio_then_forwards_and_stops`、无 PCM 探测测试 |
 | SWR-NTRANS-007 | `session_with_audio_blocking`、有界 Tokio 接收器、biased cancel、`SessionDriver::encode_audio` | `swr_ntrans_006_and_007_session_sends_audio_then_forwards_and_stops` |
-| SWR-NPORT-001 | Slint `NativeSessionPort` 的 `audio_path_verified` 关闭门 | `swr_nport_001_production_start_is_fail_closed_before_audio_verification` |
+| SWR-NPORT-001 | Slint `NativeSessionPort` 的音源/译音显式安全门 | `swr_nport_001_unverified_audio_modes_remain_fail_closed` |
 | SWR-NPORT-002 | `TransportTask`、`BoundedEventQueue<WorkerEvent, 32>`、原子取消与延迟 join | `swr_nport_002_worker_mailbox_is_bounded_and_freshness_first`、生命周期代码评审 |
 | SWR-NPORT-003 | `NativeSessionPort::handle_worker_event`、Slint 25 ms/最多 32 项定时排空 | `swr_nport_003_worker_events_map_to_typed_ui_lifecycle`、UI 适配代码评审 |
+| SWR-NAUDIO-001 | `NativeAudioTask`、setupComplete 后启动、音频/传输取消顺序 | 原生端口状态测试、生命周期代码评审；真机待办 `ASSURANCE-TARGET-003` |
+| SWR-NAUDIO-002 | CPAL 回调有界 `sync_channel(12)`、工作线程 `Resampler`/`PcmFramer` | `swr_naudio_001_resampling_is_chunk_boundary_independent`、回调代码评审 |
+| SWR-NAUDIO-003 | `PCM_QUEUE_FRAMES=6`、16 kHz/640 样本/PCM16 | `swr_naudio_002_framer_emits_exact_bounded_pcm_frames` |
 
 ## 开放验证项
 
@@ -78,3 +81,4 @@
 - `ASSURANCE-INDEP-001`：在具备第二位合格评审者时记录验证独立性；
 - `ASSURANCE-TARGET-001`：Windows/macOS 真机结果必须链接到对应需求，不能用 Linux CI 替代。
 - `ASSURANCE-TARGET-002`：在 Windows/macOS 真机验证 Slint 设备名称、默认端点、热插拔刷新、持久化选择恢复和权限失败；Linux CI 仅证明可编译。
+- `ASSURANCE-TARGET-003`：在 Windows/macOS 真机验证 Slint 麦克风权限、默认/指定设备、16 kHz PCM 上行、设备失效和确定性停止；完成前不得宣称麦克风生产验收。
