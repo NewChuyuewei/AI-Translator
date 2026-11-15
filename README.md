@@ -49,14 +49,15 @@ gradle -p android --no-daemon testDebugUnitTest assembleDebug
 
 ## Packaging
 
-The release workflow produces build-only artifacts from the native Slint binary:
+The manually dispatched native workflow lets the operator independently choose `all`, `desktop`, `windows`, `macos`, `linux`, or `android`, and one of three controlled modes:
 
-- Windows x64 portable ZIP and per-user NSIS installer;
-- macOS Apple Silicon `.app` layout and DMG, minimum macOS 13;
-- Linux x64 auxiliary tarball;
-- native Android debug APK.
+- `build_only`: private workflow artifacts; accepts a stable or `alpha`/`beta`/`rc` version;
+- `prerelease`: publishes an explicitly unvalidated GitHub prerelease and requires a tag such as `v2.1.0-rc.1`;
+- `release`: requires all platforms, a final `vMAJOR.MINOR.PATCH` tag, and complete physical-target evidence.
 
-Stable/prerelease publication is blocked until all eight physical-target evidence records pass `node scripts/check-target-evidence.mjs --require-complete`. See:
+Native outputs are Windows x64 portable ZIP/NSIS, macOS Apple Silicon `.app`/DMG, Linux x64 auxiliary tarball, and a native Android debug APK. Debug Android artifacts are never attached to a production release.
+
+Only production publication is blocked until all eight physical-target evidence records pass `node scripts/check-target-evidence.mjs --require-complete`. A prerelease is solely a distribution mechanism for controlled validation and carries no production-readiness claim. See:
 
 - [`docs/assurance/TARGET_VALIDATION_CHECKLIST.md`](docs/assurance/TARGET_VALIDATION_CHECKLIST.md)
 - [`docs/assurance/evidence/README.md`](docs/assurance/evidence/README.md)

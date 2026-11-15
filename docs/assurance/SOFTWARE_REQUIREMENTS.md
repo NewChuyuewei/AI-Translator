@@ -40,7 +40,8 @@
 | SWR-NLIFE-003 | Windows/macOS 必须注册无修饰键全局 F8 以复用唯一开始/停止入口；注册失败必须显式保持禁用，事件必须经容量 1 的合并邮箱进入 UI 线程，退出必须注销并回收原生资源。 | 邮箱容量测试、平台资源代码评审、双平台真机待办 |
 | SWR-NPKG-001 | 桌面源码和发布流程不得保留 Tauri、WebView UI、Vite 或 jsdom 运行/构建入口；桌面二进制必须只由 Cargo workspace 的 `translator-desktop` Slint 入口生成。 | 遗留边界脚本、Windows/macOS 原生 runner 构建 |
 | SWR-NPKG-002 | Windows 必须生成原生便携 ZIP 与 NSIS 安装包；macOS 必须生成最低 13.0、含麦克风/屏幕说明和音频/网络 entitlement 的 `.app`/DMG，并在上传前验证 plist、代码签名布局和产物存在。 | release workflow 代码评审、build-only 产物构建、真机安装待办 |
-| SWR-NVER-001 | 稳定版发布必须要求 ASSURANCE-TARGET-001..008 的结构化通过记录、完整提交、物理目标用例、产物 SHA-256 及 tester/reviewer 独立性；缺失或损坏记录必须阻止发布。 | 证据模式脚本、发布门代码评审 |
+| SWR-NPKG-003 | 手动工作流必须可选择全平台、全桌面或单独 Windows/macOS/Linux/Android 构建；build-only 不发布，prerelease 必须使用 alpha/beta/rc 版本并声明未验收，production release 必须强制全平台、最终 SemVer 和完整目标证据。 | preflight 选择测试、工作流代码评审、候选构建验证 |
+| SWR-NVER-001 | 稳定版发布必须要求 ASSURANCE-TARGET-001..008 的结构化通过记录、同一完整提交和最终版本、物理目标用例、产物 SHA-256 及 tester/reviewer 独立性；缺失、版本不符或损坏记录必须阻止发布。 | 证据模式脚本、发布门代码评审 |
 | SWR-NVER-002 | CI 必须收集 Rust workspace 结构覆盖报告并将其标记为未鉴定工具生成的辅助证据；覆盖率不得替代需求覆盖、独立评审或真机验收。 | cargo-llvm-cov CI 产物、DO-178C 计划评审 |
 | SWR-NVER-003 | 自动验证必须覆盖乱序、取消、容量耗尽、畸形/超限输入、认证失败、音频格式/欠载、适配器失败和证据损坏；无法模拟的驱动/权限故障必须保留为目标设备开放项。 | workspace `swr_*` 测试、故障注入矩阵、目标设备清单 |
 | SWR-SET-001 | 普通设置编码不得包含 API Key、代理 URL 或代理凭据；`saveSensitive` 只能表示独立加密保险库的用户选择。 | 明文扫描和序列化测试 |

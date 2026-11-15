@@ -38,6 +38,7 @@
 | SWR-NLIFE-003 | `desktop_lifecycle::GlobalHotkey` 的 Windows 消息线程、macOS Carbon 注册、容量 1 邮箱及 Slint 25 ms 排空 | `swr_nlife_003_hotkey_mailbox_is_bounded_and_coalescing`、Windows/macOS target cross-check、平台代码评审；真机待办 `ASSURANCE-TARGET-007` |
 | SWR-NPKG-001 | 删除 `src-tauri`/Web UI/Vite/jsdom，Cargo `translator-desktop` 为唯一桌面入口 | `scripts/check-no-legacy-desktop.mjs`、Windows/macOS native CI build |
 | SWR-NPKG-002 | 原生 Cargo release、NSIS/portable ZIP、macOS app plist/entitlements/ad-hoc layout signing/DMG | release build-only workflow；安装验收归入 `ASSURANCE-TARGET-001` |
+| SWR-NPKG-003 | release workflow 的模式/目标 preflight、动态桌面矩阵和 Android 门 | YAML/版本脚本测试；build-only 与 prerelease 受控运行；production evidence gate |
 | SWR-NVER-001 | `check-target-evidence.mjs` 固定 8 项模式和 publish 前 strict gate | 缺失证据时确定性拒绝、结构代码评审；当前状态 OPEN |
 | SWR-NVER-002 | CI `cargo llvm-cov` LCOV artifact | `rust-structural-coverage` 辅助产物；工具鉴定待办 `ASSURANCE-COV-001` |
 | SWR-NVER-003 | `FAULT_INJECTION_MATRIX.md` 与 bounded/cancel/invalid/failure `swr_*` 测试 | 全 workspace 测试；驱动故障保留至 `ASSURANCE-TARGET-001..008` |

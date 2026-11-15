@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseVersion } from './version-utils.mjs';
 
 const required = new Map([
   ['ASSURANCE-TARGET-001', 'windows-macos'],
@@ -16,6 +17,9 @@ const requireComplete = process.argv.includes('--require-complete');
 const commitIndex = process.argv.indexOf('--commit');
 const expectedCommit = commitIndex >= 0 ? process.argv[commitIndex + 1] : undefined;
 if (commitIndex >= 0 && !/^[0-9a-f]{40}$/.test(expectedCommit || '')) throw new Error('--commit requires a full lowercase Git SHA');
+const versionIndex = process.argv.indexOf('--version');
+const expectedVersion = versionIndex >= 0 ? process.argv[versionIndex + 1] : undefined;
+if (versionIndex >= 0 && (!expectedVersion || parseVersion(expectedVersion).prerelease)) throw new Error('--version requires a final MAJOR.MINOR.PATCH version');
 const records = new Map();
 
 if (fs.existsSync(directory)) {
@@ -26,6 +30,14 @@ if (fs.existsSync(directory)) {
     if (record.scope !== required.get(record.targetId)) throw new Error(`${filename}: incorrect scope`);
     if (!/^[0-9a-f]{40}$/.test(record.commit || '')) throw new Error(`${filename}: commit must be a full Git SHA`);
     if (expectedCommit && record.commit !== expectedCommit) throw new Error(`${filename}: evidence is not for release commit ${expectedCommit}`);
+    let recordVersion;
+    try {
+      recordVersion = parseVersion(record.version);
+    } catch {
+      throw new Error(`${filename}: version must be a final MAJOR.MINOR.PATCH version`);
+    }
+    if (recordVersion.prerelease) throw new Error(`${filename}: prerelease builds cannot be final acceptance evidence`);
+    if (expectedVersion && record.version !== expectedVersion) throw new Error(`${filename}: evidence is not for release version ${expectedVersion}`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(record.executedOn || '')) throw new Error(`${filename}: invalid executedOn`);
     if (!record.tester || !record.reviewer || record.tester === record.reviewer) throw new Error(`${filename}: independent tester and reviewer are required`);
     if (record.result !== 'passed') throw new Error(`${filename}: result must be passed`);
@@ -42,6 +54,11 @@ const commits = new Set([...records.keys()].map(id => {
   return JSON.parse(fs.readFileSync(path.join(directory, filename), 'utf8')).commit;
 }));
 if (requireComplete && commits.size !== 1) throw new Error('All target evidence must identify one tested release commit');
+const versions = new Set([...records.keys()].map(id => {
+  const filename = records.get(id);
+  return JSON.parse(fs.readFileSync(path.join(directory, filename), 'utf8')).version;
+}));
+if (requireComplete && versions.size !== 1) throw new Error('All target evidence must identify one tested final version');
 if (process.argv.includes('--print-commit')) {
   if (!requireComplete || commits.size !== 1) throw new Error('--print-commit requires complete evidence for one commit');
   process.stdout.write(`${[...commits][0]}\n`);
