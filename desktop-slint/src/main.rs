@@ -503,17 +503,21 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    caption.set_locked(control.get_overlay_locked());
     let weak = control.as_weak();
+    let caption_weak = caption.as_weak();
     control.on_toggle_overlay_lock(move || {
-        if let Some(ui) = weak.upgrade() {
-            let locked = !ui.get_overlay_locked();
-            ui.set_overlay_locked(locked);
-            ui.set_status_message(if locked {
-                "字幕窗已标记为锁定；平台级鼠标穿透适配器尚待接入。".into()
-            } else {
-                "字幕窗已解锁，可由窗口管理器移动。".into()
-            });
-        }
+        let (Some(ui), Some(window)) = (weak.upgrade(), caption_weak.upgrade()) else {
+            return;
+        };
+        let locked = !ui.get_overlay_locked();
+        ui.set_overlay_locked(locked);
+        window.set_locked(locked);
+        ui.set_status_message(if locked {
+            "字幕窗已锁定；拖动已禁用。鼠标穿透在平台适配验收前保持关闭。".into()
+        } else {
+            "字幕窗已解锁，可拖动移动。".into()
+        });
     });
 
     let caption_weak = caption.as_weak();

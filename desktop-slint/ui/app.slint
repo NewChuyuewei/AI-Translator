@@ -4,23 +4,39 @@ export component CaptionWindow inherits Window {
     title: "Gemini Live Translator · 字幕";
     width: 760px;
     height: 138px;
-    background: #101820e8;
+    always-on-top: true;
+    no-frame: true;
+    background: transparent;
     in-out property <string> original-text: "等待语音输入…";
     in-out property <string> translated-text: "翻译将在这里显示";
     in-out property <float> caption-scale: 1.0;
     in-out property <bool> transcription-only: false;
+    in-out property <bool> locked: true;
 
-    VerticalBox {
-        padding: 15px;
-        spacing: 7px;
-        Text { text: root.original-text; color: #e8eef2; font-size: 16px * root.caption-scale; overflow: elide; }
-        Text {
-            visible: !root.transcription-only;
-            text: root.translated-text;
-            color: #87e8c7;
-            font-size: 20px * root.caption-scale;
-            font-weight: 700;
-            overflow: elide;
+    Rectangle {
+        background: #101820e8;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: #455667;
+
+        // SWR-NCAP-001: the window manager owns movement. Locking
+        // deterministically disables the only move initiator.
+        WindowMoveArea {
+            enabled: !root.locked;
+        }
+
+        VerticalBox {
+            padding: 15px;
+            spacing: 7px;
+            Text { text: root.original-text; color: #e8eef2; font-size: 16px * root.caption-scale; overflow: elide; }
+            Text {
+                visible: !root.transcription-only;
+                text: root.translated-text;
+                color: #87e8c7;
+                font-size: 20px * root.caption-scale;
+                font-weight: 700;
+                overflow: elide;
+            }
         }
     }
 }

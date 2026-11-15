@@ -31,6 +31,8 @@
 | SWR-DIAG-004 | `LogLevel`、`LogEntry`、Tauri `Trace` 适配器 | `swr_diag_004_level_serialization_remains_frontend_compatible`、UI mock 测试 |
 | SWR-NDIAG-001 | Slint `NativeDiagnostics::begin_boundary`/`record`、`diagnostic-model` | `swr_ndiag_001_boundary_redacts_ui_lines_and_copy_text`、UI 绑定代码评审 |
 | SWR-NDIAG-002 | `NativeDiagnostics::copy_text` 64 Ki 字符上限、核心 `clear` 水位线 | `swr_ndiag_002_copy_is_bounded_and_clear_uses_core_watermark` |
+| SWR-NCAP-001 | `CaptionWindow` 的 `always-on-top`、`no-frame`、透明背景与受 `locked` 控制的 `WindowMoveArea` | Slint 编译、属性绑定代码评审；真机待办 `ASSURANCE-TARGET-006` |
+| SWR-NCAP-002 | 鼠标穿透保持关闭直至平台适配器成功并完成验收 | 故障注入待办、真机待办 `ASSURANCE-TARGET-006` |
 | SWR-SET-001 | `settings_for_storage`、`encode_settings` | `swr_set_001_encode_never_contains_sensitive_values`、旧 Tauri 设置测试 |
 | SWR-SET-002 | `PersistedSettings`、`decode_settings` | `swr_set_002_current_format_round_trips_with_compatible_fields`、前端 mock 测试 |
 | SWR-SET-003 | `DecodedSettings::migration_required`、Tauri 原子写适配器 | `swr_set_003_legacy_migration_is_explicit_and_erases_secrets`、代码评审 |
@@ -92,3 +94,4 @@
 - `ASSURANCE-TARGET-003`：在 Windows/macOS 真机验证 Slint 麦克风权限、默认/指定设备、16 kHz PCM 上行、设备失效和确定性停止；完成前不得宣称麦克风生产验收。
 - `ASSURANCE-TARGET-004`：在 Windows/macOS 真机验证 Slint 默认/指定播放设备、24 kHz 译音重采样、中断清空、设备失效及停止无残留；完成前不得宣称译音播放生产验收。
 - `ASSURANCE-TARGET-005`：在 Windows 真机验证 Slint WASAPI loopback 默认/指定 render endpoint、系统音频、麦克风混合、单路欠载、设备失效和停止；完成前不得宣称 Windows 系统采集生产验收。
+- `ASSURANCE-TARGET-006`：在 Windows/macOS 真机验证字幕窗置顶、透明无边框、解锁拖动、锁定禁止拖动，以及鼠标穿透失败时仍可恢复；Linux CI 不能替代窗口管理器验收。
