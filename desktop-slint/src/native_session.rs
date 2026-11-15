@@ -2,7 +2,10 @@
 //! publishes only bounded, typed events. Audio activation remains fail-closed
 //! until the capture path is integrated and independently verified.
 
-use crate::native_transport::{self, ProbeCancel, SessionTransportEvent};
+use crate::{
+    native_audio::{AudioTaskEvent, NativeAudioTask},
+    native_transport::{self, ProbeCancel, SessionTransportEvent},
+};
 use anyhow::{Result, anyhow};
 use std::{
     sync::{
@@ -12,13 +15,14 @@ use std::{
     thread::JoinHandle,
 };
 use translator_core::{
-    SessionEvent, SessionOptions, SessionPhase, SessionStatus,
+    AudioSourceMode, SessionEvent, SessionOptions, SessionPhase, SessionStatus,
     server_protocol::ParsedMessage,
     session_port::{BoundedEventQueue, CaptionSnapshot, NoticeText, SessionPort, UiEvent},
 };
 
 const WORKER_EVENT_CAPACITY: usize = 32;
 const UI_EVENT_CAPACITY: usize = 32;
+const PCM_QUEUE_FRAMES: usize = 6;
 
 #[derive(Debug)]
 enum WorkerEvent {
@@ -31,6 +35,7 @@ struct TransportTask {
     cancel: ProbeCancel,
     events: Arc<Mutex<BoundedEventQueue<WorkerEvent, WORKER_EVENT_CAPACITY>>>,
     finished: Arc<AtomicBool>,
+    audio_sender: tokio::sync::mpsc::Sender<Vec<u8>>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -43,10 +48,16 @@ impl TransportTask {
         let completion_cancel = Arc::clone(&cancel);
         let worker_events = Arc::clone(&events);
         let worker_finished = Arc::clone(&finished);
+        let (audio_sender, audio_receiver) = tokio::sync::mpsc::channel(PCM_QUEUE_FRAMES);
         let join = std::thread::spawn(move || {
-            let result = native_transport::session_blocking(options, worker_cancel, |event| {
-                push_worker_event(&worker_events, WorkerEvent::Transport(event));
-            });
+            let result = native_transport::session_with_audio_blocking(
+                options,
+                worker_cancel,
+                audio_receiver,
+                |event| {
+                    push_worker_event(&worker_events, WorkerEvent::Transport(event));
+                },
+            );
             let completion = match result {
                 Ok(_) => WorkerEvent::Completed,
                 Err(_) if completion_cancel.load(Ordering::Acquire) => WorkerEvent::Completed,
@@ -59,8 +70,13 @@ impl TransportTask {
             cancel,
             events,
             finished,
+            audio_sender,
             join: Some(join),
         }
+    }
+
+    fn audio_sender(&self) -> tokio::sync::mpsc::Sender<Vec<u8>> {
+        self.audio_sender.clone()
     }
 
     fn request_stop(&self) {
@@ -99,29 +115,29 @@ fn push_worker_event(
     lock_events(events).push(event);
 }
 
-/// Production construction intentionally leaves `audio_path_verified` false.
-/// This installs the final lifecycle shape without allowing a network-only
-/// session to be presented as an operational audio session.
 #[derive(Default)]
 pub struct NativeSessionPort {
     status: SessionStatus,
     events: BoundedEventQueue<UiEvent, UI_EVENT_CAPACITY>,
     task: Option<TransportTask>,
-    audio_path_verified: bool,
+    audio: Option<NativeAudioTask>,
+    microphone_device: Option<String>,
 }
 
 impl NativeSessionPort {
     fn handle_worker_event(&mut self, event: WorkerEvent) {
         match event {
             WorkerEvent::Transport(SessionTransportEvent::SetupComplete) => {
-                match self.status.phase.transition(SessionEvent::SetupCompleted) {
-                    Ok(phase) => {
-                        self.status.phase = phase;
-                        self.status.message = "原生网络会话已建立".into();
-                        self.events.push(UiEvent::Status(self.status.clone()));
-                    }
-                    Err(error) => self.fail(&error.to_string()),
-                }
+                let Some(task) = self.task.as_ref() else {
+                    self.fail("原生传输任务缺失");
+                    return;
+                };
+                self.status.message = "网络已连接，正在打开麦克风".into();
+                self.events.push(UiEvent::Status(self.status.clone()));
+                self.audio = Some(NativeAudioTask::spawn(
+                    self.microphone_device.clone(),
+                    task.audio_sender(),
+                ));
             }
             WorkerEvent::Transport(SessionTransportEvent::Message(message)) => {
                 self.publish_message(message);
@@ -136,11 +152,42 @@ impl NativeSessionPort {
                         }
                         Err(error) => self.fail(&error.to_string()),
                     }
-                } else {
+                } else if self.status.phase != SessionPhase::Error {
                     self.fail("原生传输意外结束");
                 }
             }
             WorkerEvent::Failed(message) => self.fail(message.as_str()),
+        }
+    }
+
+    fn handle_audio_event(&mut self, event: AudioTaskEvent) {
+        match event {
+            AudioTaskEvent::Ready => {
+                match self.status.phase.transition(SessionEvent::SetupCompleted) {
+                    Ok(phase) => {
+                        self.status.phase = phase;
+                        self.status.message = "原生麦克风会话正在运行".into();
+                        self.events.push(UiEvent::Status(self.status.clone()));
+                    }
+                    Err(error) => self.fail(&error.to_string()),
+                }
+            }
+            AudioTaskEvent::Failed(message) => {
+                if let Some(task) = &self.task {
+                    task.request_stop();
+                }
+                self.fail(message.as_str());
+            }
+            AudioTaskEvent::Stopped => {
+                if self.status.phase != SessionPhase::Stopping
+                    && self.status.phase != SessionPhase::Error
+                {
+                    if let Some(task) = &self.task {
+                        task.request_stop();
+                    }
+                    self.fail("麦克风采集意外停止");
+                }
+            }
         }
     }
 
@@ -176,16 +223,20 @@ impl SessionPort for NativeSessionPort {
         if self.status.phase.is_active() || self.task.is_some() {
             return Err(anyhow!("原生会话已在运行或停止中"));
         }
-        if !self.audio_path_verified {
+        if options.mode != AudioSourceMode::MicrophoneOnly {
             return Err(anyhow!(
-                "原生音频路径尚未完成验证；未采集、连接或上传任何音频"
+                "Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
             ));
+        }
+        if options.play_translation() {
+            return Err(anyhow!("Slint 原生译音播放尚未完成验证；请先关闭译音播放"));
         }
         let phase = self.status.phase.transition(SessionEvent::StartRequested)?;
         self.status.phase = phase;
         self.status.message = "正在连接原生传输".into();
         self.status.transcription_only = options.model.is_transcription_only();
         self.events.push(UiEvent::Status(self.status.clone()));
+        self.microphone_device = options.microphone_device.clone();
         self.task = Some(TransportTask::spawn(options.clone()));
         Ok(())
     }
@@ -199,6 +250,9 @@ impl SessionPort for NativeSessionPort {
         self.status.phase = phase;
         self.status.message = "正在停止".into();
         self.events.push(UiEvent::Status(self.status.clone()));
+        if let Some(audio) = &self.audio {
+            audio.request_stop();
+        }
         task.request_stop();
         Ok(())
     }
@@ -211,9 +265,21 @@ impl SessionPort for NativeSessionPort {
         if let Some(event) = self.events.pop() {
             return Some(event);
         }
+        let audio_event = self.audio.as_mut().and_then(NativeAudioTask::poll);
+        if let Some(event) = audio_event {
+            let terminal = matches!(event, AudioTaskEvent::Stopped | AudioTaskEvent::Failed(_));
+            self.handle_audio_event(event);
+            if terminal {
+                self.audio = None;
+            }
+            return self.events.pop();
+        }
         let worker_event = self.task.as_mut().and_then(TransportTask::poll);
         if let Some(event) = worker_event {
             let terminal = matches!(event, WorkerEvent::Completed | WorkerEvent::Failed(_));
+            if terminal && let Some(audio) = &self.audio {
+                audio.request_stop();
+            }
             self.handle_worker_event(event);
             if terminal {
                 self.task = None;
@@ -252,12 +318,14 @@ mod tests {
     }
 
     #[test]
-    fn swr_nport_001_production_start_is_fail_closed_before_audio_verification() {
+    fn swr_nport_001_unverified_audio_modes_remain_fail_closed() {
         let mut port = NativeSessionPort::default();
-        let error = port.start(&options()).expect_err("audio gate must reject");
+        let mut options = options();
+        options.mode = AudioSourceMode::Mixed;
+        let error = port.start(&options).expect_err("audio gate must reject");
         assert_eq!(
             error.to_string(),
-            "原生音频路径尚未完成验证；未采集、连接或上传任何音频"
+            "Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
         );
         assert_eq!(port.phase(), SessionPhase::Idle);
         assert!(port.poll_event().is_none());
@@ -282,7 +350,7 @@ mod tests {
     fn swr_nport_003_worker_events_map_to_typed_ui_lifecycle() {
         let mut port = NativeSessionPort::default();
         port.status.phase = SessionPhase::Connecting;
-        port.handle_worker_event(WorkerEvent::Transport(SessionTransportEvent::SetupComplete));
+        port.handle_audio_event(AudioTaskEvent::Ready);
         assert_eq!(port.phase(), SessionPhase::Running);
         let message = ParsedMessage {
             input: Some(("hello".into(), true)),
