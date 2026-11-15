@@ -11,7 +11,7 @@ The `1.0.0` version milestone does not validate the existing Android target. And
 - **Security:** Android Keystore-backed secret storage, bounded configuration parsing, redacted logs, screenshot protection, and explicit secret cleanup.
 - **Build:** stable JDK 25, stable Kotlin, stable Android Gradle Plugin/Gradle, Java source/target 25, and Kotlin JVM target 25. No alpha, beta, or RC toolchain releases.
 
-Desktop platforms keep their existing Tauri/Rust implementation. Android shares protocol fixtures and behavioral tests rather than native Rust code.
+Desktop platforms use the native Rust + Slint implementation. Android shares protocol fixtures and behavioral tests rather than native Rust code.
 
 ## Delivery stages
 

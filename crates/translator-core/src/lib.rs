@@ -1,5 +1,5 @@
-//! UI-independent application contracts shared by the legacy Tauri adapter and
-//! the native Slint desktop. This crate deliberately has no UI, audio-backend,
+//! UI-independent application contracts used by the native Slint desktop.
+//! This crate deliberately has no UI, audio-backend,
 //! network-runtime, or platform-framework dependency.
 
 #![forbid(unsafe_code)]

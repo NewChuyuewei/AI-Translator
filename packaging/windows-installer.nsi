@@ -1,6 +1,5 @@
-; Per-user Windows x64 installer for the GNU cross-compiled portable build.
-; Linux: LC_ALL=C.UTF-8 makensis -INPUTCHARSET UTF8 -DINPUT_DIR=/path/to/payload \
-;   -DOUTPUT_FILE=/path/to/Gemini-Live-Translator-Setup.exe packaging/windows-installer.nsi
+; Per-user Windows x64 installer for the native Slint release binary.
+; Invoke on Windows with UTF-8 NSIS and INPUT_DIR/OUTPUT_FILE definitions.
 Unicode true
 RequestExecutionLevel user
 
@@ -8,9 +7,6 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 !include "x64.nsh"
 
-!ifndef INPUT_DIR
-  !error "Define INPUT_DIR containing the app exe and WebView2Loader.dll"
-!endif
 !ifndef OUTPUT_FILE
   !error "Define OUTPUT_FILE for the installer exe"
 !endif
@@ -35,7 +31,7 @@ ShowInstDetails show
 ShowUninstDetails show
 
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TEXT "此安装程序将为当前 Windows 用户安装 Gemini Live Translator。$\r$\n$\r$\n应用需要 Microsoft Edge WebView2 Runtime；如果电脑没有安装，请从 Microsoft 官网安装。$\r$\n$\r$\n这是未经 Windows 真机验证的开发原型。"
+!define MUI_WELCOMEPAGE_TEXT "此安装程序将为当前 Windows 用户安装 Gemini Live Translator 原生 Slint 桌面应用。$\r$\n$\r$\n发布前仍必须完成对应提交的 Windows 真机验收。"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -55,9 +51,8 @@ FunctionEnd
 Section "Install"
   SetShellVarContext current
   SetOutPath "$INSTDIR"
-  File "${INPUT_DIR}/${APP_EXE}"
-  File "${INPUT_DIR}/WebView2Loader.dll"
-  File /oname=COPYRIGHT.txt "${__FILEDIR__}/../COPYRIGHT"
+  File "payload\${APP_EXE}"
+  File "payload\COPYRIGHT.txt"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}"
@@ -78,7 +73,6 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\卸载.lnk"
   RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
   Delete "$INSTDIR\${APP_EXE}"
-  Delete "$INSTDIR\WebView2Loader.dll"
   Delete "$INSTDIR\COPYRIGHT.txt"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"

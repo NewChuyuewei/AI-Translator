@@ -23,22 +23,23 @@ function replace(path, pattern, replacement, label) {
 }
 
 json('package.json', value => { value.version = version; });
-json('package-lock.json', value => {
-  value.version = version;
-  value.packages[''].version = version;
-});
-replace('src-tauri/tauri.conf.json', /(\"version\"\s*:\s*\")[^\"]+(\")/, `$1${version}$2`, 'Tauri version');
-replace('src-tauri/tauri.android.conf.json', /(\"version\"\s*:\s*\")[^\"]+(\")/, `$1${version}$2`, 'Android Tauri version');
 replace('android/app/build.gradle.kts', /(versionCode\s*=\s*)\d+/, `$1${versionCode}`, 'native Android versionCode');
 replace('android/app/build.gradle.kts', /(versionName\s*=\s*")[^"]+(")/, `$1${version}$2`, 'native Android versionName');
-// Git may check text files out as CRLF on Windows runners. Match logical line
-// boundaries rather than assuming LF so custom releases are platform-neutral.
 replace('Cargo.toml', /(\[workspace\.package\][\s\S]*?[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'workspace package version');
-for (const crate of ['translator-core', 'translator-desktop']) {
-  replace('Cargo.lock', new RegExp(`(\\[\\[package\\]\\][\\r\\n]+name\\s*=\\s*"${crate}"[\\r\\n]+version\\s*=\\s*")[^"]+(")`), `$1${version}$2`, `${crate} workspace lock version`);
+for (const crate of [
+  'caption-platform',
+  'desktop-lifecycle',
+  'macos-system-audio',
+  'translator-core',
+  'translator-desktop',
+]) {
+  replace(
+    'Cargo.lock',
+    new RegExp(`(\\[\\[package\\]\\][\\r\\n]+name\\s*=\\s*"${crate}"[\\r\\n]+version\\s*=\\s*")[^"]+(")`),
+    `$1${version}$2`,
+    `${crate} workspace lock version`,
+  );
 }
-replace('src-tauri/Cargo.toml', /(\[package\][\s\S]*?[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo package version');
-replace('src-tauri/Cargo.lock', /(\[\[package\]\][\r\n]+name\s*=\s*"gemini-live-translator"[\r\n]+version\s*=\s*")[^"]+(")/, `$1${version}$2`, 'Cargo lock application version');
 replace('packaging/windows-installer.nsi', /!define PRODUCT_VERSION "[^"]+"/, `!define PRODUCT_VERSION "${version}"`, 'NSIS product version');
 replace('packaging/windows-portable-readme.txt', /^Gemini Live Translator [^ ]+/m, `Gemini Live Translator ${version}`, 'portable package version');
 

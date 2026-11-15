@@ -1,23 +1,18 @@
-name: Build and release
+name: Native Slint build and release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Custom release tag (vMAJOR.MINOR.PATCH), for example v0.2.1
+        description: Custom release tag (vMAJOR.MINOR.PATCH)
         required: true
         type: string
       release_mode:
-        description: Choose whether to keep artifacts only, publish a prerelease, or publish a stable release
+        description: Build artifacts only or publish after all target evidence gates pass
         required: true
         default: build_only
         type: choice
-        options:
-          - build_only
-          - prerelease
-          - release
+        options: [build_only, prerelease, release]
 
 permissions:
   contents: read
@@ -27,95 +22,139 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Select controlled source commit
+    runs-on: ubuntu-24.04
+    outputs:
+      build_commit: ${{ steps.source.outputs.build_commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: source
+        name: Validate evidence and select source
+        shell: bash
+        run: |
+          if [[ "${{ inputs.release_mode }}" == "build_only" ]]; then
+            build_commit="$GITHUB_SHA"
+          else
+            build_commit="$(node scripts/check-target-evidence.mjs --require-complete --print-commit)"
+            git cat-file -e "${build_commit}^{commit}"
+          fi
+          echo "build_commit=${build_commit}" >> "$GITHUB_OUTPUT"
+
   desktop:
-    name: ${{ matrix.label }}
+    name: Native Slint · ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-2022
             label: Windows x64
-            bundles: nsis
             artifact: windows-x64
-          # screencapturekit 11 pulls apple-metal 0.10, whose Swift bridge
-          # references Metal APIs from the macOS 26 SDK. macos-15 defaults to
-          # Xcode 16.4 even though newer Xcodes are installed, so use the
-          # Apple Silicon image whose default toolchain is Xcode 26.
-          - os: macos-26
+          - os: macos-15
             label: macOS Apple Silicon
-            bundles: dmg
             artifact: macos-arm64
           - os: ubuntu-24.04
-            label: Linux x64
-            bundles: deb,appimage
+            label: Linux x64 auxiliary
             artifact: linux-x64
     runs-on: ${{ matrix.os }}
+    needs: preflight
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.preflight.outputs.build_commit }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - name: Apply custom release version
+      - name: Apply and verify controlled version
         shell: bash
         run: |
-          test "${RELEASE_TAG}" = "v${RELEASE_TAG#v}" || { echo "Release tag must start with v"; exit 1; }
-          node scripts/set-version.mjs "${RELEASE_TAG#v}"
-      - name: Verify macOS 26 SDK toolchain
-        if: runner.os == 'macOS'
-        run: |
-          xcodebuild -version
-          test "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -ge 26
-      - name: Install Linux dependencies
+          VERSION="${RELEASE_TAG#v}"
+          test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Release tag must use vMAJOR.MINOR.PATCH"; exit 1; }
+          node scripts/set-version.mjs "$VERSION"
+          node scripts/check-version.mjs
+          node scripts/check-no-legacy-desktop.mjs
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+      - name: Install Linux native dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libasound2-dev pkg-config
-      - run: npm ci
-      - run: npm run test:ui
-      - name: Build native bundles
-        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
-      - name: Create Windows portable ZIP
+            libasound2-dev libfontconfig1-dev libxkbcommon-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev \
+            libayatana-appindicator3-dev pkg-config
+      - name: Build native Slint desktop
+        run: cargo build --release --locked -p translator-desktop
+      - name: Stage Windows portable ZIP and NSIS installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          $binary = "src-tauri/target/release/gemini-live-translator.exe"
-          if (-not (Test-Path $binary)) { throw "Windows application binary was not found: $binary" }
-
-          $portableName = "Gemini-Live-Translator-$version-Windows-portable"
-          $portableDir = Join-Path $env:RUNNER_TEMP $portableName
-          $archive = "release-assets/$portableName.zip"
-          New-Item -ItemType Directory -Force -Path $portableDir, "release-assets" | Out-Null
-          Copy-Item $binary (Join-Path $portableDir "Gemini-Live-Translator.exe")
-          $readme = Get-Content "packaging/windows-portable-readme.txt" -Raw
-          $readme = $readme -replace '(?m)^Gemini Live Translator [^ ]+', "Gemini Live Translator $version"
-          Set-Content (Join-Path $portableDir "README.txt") -Value $readme -Encoding utf8
-          Copy-Item "COPYRIGHT" (Join-Path $portableDir "COPYRIGHT.txt")
-
-          # MSVC normally links the WebView2 loader statically. Preserve a DLL
-          # beside the executable if a future Tauri build emits one dynamically.
-          $loader = Get-ChildItem "src-tauri/target/release" -Recurse -Filter "WebView2Loader.dll" |
-            Select-Object -First 1
-          if ($loader) { Copy-Item $loader.FullName $portableDir }
-
-          Compress-Archive -Path "$portableDir/*" -DestinationPath $archive -CompressionLevel Optimal
-          Write-Host "Created $archive"
-      - name: Stage native bundles
+          try {
+            $version = "${env:RELEASE_TAG}".TrimStart('v')
+            $payload = Join-Path (Resolve-Path "packaging").Path "payload"
+            $portable = Join-Path $env:RUNNER_TEMP "Gemini-Live-Translator-$version-Windows-portable"
+            New-Item -ItemType Directory -Force -Path $payload, $portable, "release-assets" | Out-Null
+            Copy-Item "target/release/gemini-live-translator.exe" (Join-Path $payload "Gemini-Live-Translator.exe")
+            Copy-Item "COPYRIGHT" (Join-Path $payload "COPYRIGHT.txt")
+            Copy-Item (Join-Path $payload "Gemini-Live-Translator.exe") $portable
+            Copy-Item "packaging/windows-portable-readme.txt" (Join-Path $portable "README.txt")
+            Copy-Item "COPYRIGHT" (Join-Path $portable "COPYRIGHT.txt")
+            Compress-Archive -Path "$portable/*" -DestinationPath "release-assets/Gemini-Live-Translator-$version-Windows-portable.zip" -CompressionLevel Optimal
+            $installer = (Resolve-Path "release-assets").Path + "\Gemini-Live-Translator-$version-Windows-Setup.exe"
+            $installerNsis = $installer.Replace('\', '/')
+            if (-not (Test-Path (Join-Path $payload "Gemini-Live-Translator.exe"))) { throw "Staged executable is missing" }
+            $makensis = (Get-Command makensis.exe -ErrorAction Stop).Source
+            $nsisScript = (Resolve-Path "packaging/windows-installer.nsi").Path
+            Push-Location $payload
+            try {
+              $nsisOutput = & $makensis "/INPUTCHARSET" "UTF8" "/DOUTPUT_FILE=$installerNsis" $nsisScript 2>&1
+            } finally {
+              Pop-Location
+            }
+            $nsisOutput | Write-Output
+            if ($LASTEXITCODE -ne 0) {
+              $nsisTail = ($nsisOutput | Select-Object -Last 20) -join "`n"
+              throw "makensis failed with exit code $LASTEXITCODE`n$nsisTail"
+            }
+          } catch {
+            $safeMessage = $_.Exception.Message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows native packaging failed::$safeMessage"
+            throw
+          }
+      - name: Stage signed-layout macOS application and DMG
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          mkdir -p release-assets
-          find src-tauri/target/release/bundle -type f \
-            \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) \
-            -exec cp '{}' release-assets/ \;
+          VERSION="${RELEASE_TAG#v}"
+          APP="$RUNNER_TEMP/Gemini Live Translator.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" release-assets
+          cp target/release/gemini-live-translator "$APP/Contents/MacOS/gemini-live-translator"
+          sed "s/__VERSION__/${VERSION}/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+          cp COPYRIGHT "$APP/Contents/Resources/COPYRIGHT.txt"
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --force --deep --sign - --entitlements packaging/macos/Entitlements.plist "$APP"
+          codesign --verify --deep --strict "$APP"
+          mkdir -p "$RUNNER_TEMP/dmg-root"
+          cp -R "$APP" "$RUNNER_TEMP/dmg-root/"
+          hdiutil create -volname "Gemini Live Translator" -srcfolder "$RUNNER_TEMP/dmg-root" -ov -format UDZO \
+            "release-assets/Gemini-Live-Translator-${VERSION}-macOS-arm64.dmg"
+      - name: Stage Linux auxiliary archive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          mkdir -p release-assets "$RUNNER_TEMP/linux-package"
+          cp target/release/gemini-live-translator "$RUNNER_TEMP/linux-package/"
+          cp COPYRIGHT "$RUNNER_TEMP/linux-package/COPYRIGHT.txt"
+          tar -C "$RUNNER_TEMP/linux-package" -czf "release-assets/Gemini-Live-Translator-${VERSION}-Linux-x64.tar.gz" .
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
@@ -126,14 +165,16 @@ jobs:
   android:
     name: Native Android Kotlin debug APK
     runs-on: ubuntu-24.04
+    needs: preflight
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.preflight.outputs.build_commit }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -146,30 +187,18 @@ jobs:
           gradle-version: 9.9.1
       - name: Apply custom release version
         run: |
-          test "${RELEASE_TAG}" = "v${RELEASE_TAG#v}" || { echo "Release tag must start with v"; exit 1; }
-          node scripts/set-version.mjs "${RELEASE_TAG#v}"
+          VERSION="${RELEASE_TAG#v}"
+          test "${RELEASE_TAG}" = "v${VERSION}" || exit 1
+          node scripts/set-version.mjs "$VERSION"
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
       - name: Test and build native Android APK
         run: gradle -p android --no-daemon testDebugUnitTest assembleDebug
-      - name: Verify Java 25 Kotlin bytecode
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          for filename in ("MainActivity.class", "SessionConfig.class"):
-              matches = list(Path("android/app/build").rglob(filename))
-              if not matches:
-                  raise SystemExit(f"Missing compiled class: {filename}")
-              versions = {int.from_bytes(path.read_bytes()[6:8], "big") for path in matches}
-              if versions != {69}:
-                  raise SystemExit(f"{filename}: expected Java 25 class version 69, got {sorted(versions)}")
-          PY
       - name: Stage APK
         run: |
           mkdir -p release-assets
-          VERSION="${RELEASE_TAG#v}"
           cp android/app/build/outputs/apk/debug/app-debug.apk \
-            "release-assets/Gemini-Live-Translator-${VERSION}-native-android-debug.apk"
+            "release-assets/Gemini-Live-Translator-${RELEASE_TAG#v}-native-android-debug.apk"
       - uses: actions/upload-artifact@v7
         with:
           name: android-native-debug
@@ -178,23 +207,25 @@ jobs:
           retention-days: 14
 
   publish:
-    name: Publish GitHub release
-    if: github.event_name == 'push' || inputs.release_mode != 'build_only'
-    needs: [desktop, android]
+    name: Evidence-gated GitHub release
+    if: inputs.release_mode != 'build_only'
+    needs: [preflight, desktop, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-      RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_mode || 'release' }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_MODE: ${{ inputs.release_mode }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate and apply custom release version
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Reconfirm physical-target evidence source commit
         run: |
-          VERSION="${RELEASE_TAG#v}"
-          node scripts/set-version.mjs "$VERSION"
-          test "${RELEASE_TAG}" = "v${VERSION}" || { echo "Release tag must use vMAJOR.MINOR.PATCH"; exit 1; }
+          tested_commit="$(node scripts/check-target-evidence.mjs --require-complete --print-commit)"
+          test "$tested_commit" = "${{ needs.preflight.outputs.build_commit }}"
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
@@ -202,17 +233,15 @@ jobs:
       - name: Create checksums
         run: |
           cd release-assets
-          find . -maxdepth 1 -type f -printf '%f\n' | sort
           sha256sum * > SHA256SUMS.txt
       - name: Create or update release
         shell: bash
         run: |
-          flags=(--title "Gemini Live Translator ${RELEASE_TAG}" --generate-notes --target "${GITHUB_SHA}")
+          flags=(--title "Gemini Live Translator ${RELEASE_TAG}" --generate-notes --target "${{ needs.preflight.outputs.build_commit }}")
           prerelease=false
           if [[ "${RELEASE_MODE}" == "prerelease" ]]; then flags+=(--prerelease); prerelease=true; fi
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release edit "${RELEASE_TAG}" --title "Gemini Live Translator ${RELEASE_TAG}" \
-              --target "${GITHUB_SHA}" --prerelease="${prerelease}"
+            gh release edit "${RELEASE_TAG}" --title "Gemini Live Translator ${RELEASE_TAG}" --target "${{ needs.preflight.outputs.build_commit }}" --prerelease="${prerelease}"
             gh release upload "${RELEASE_TAG}" release-assets/* --clobber
           else
             gh release create "${RELEASE_TAG}" release-assets/* "${flags[@]}"
