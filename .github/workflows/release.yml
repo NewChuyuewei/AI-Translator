@@ -41,7 +41,14 @@ jobs:
           if [[ "${{ inputs.release_mode }}" == "build_only" ]]; then
             build_commit="$GITHUB_SHA"
           else
-            build_commit="$(node scripts/check-target-evidence.mjs --require-complete --print-commit)"
+            if ! build_commit="$(node scripts/check-target-evidence.mjs --require-complete --print-commit 2>/dev/null)"; then
+              evidence_status="$(node scripts/check-target-evidence.mjs 2>&1 || true)"
+              safe_status="${evidence_status//'%'/'%25'}"
+              safe_status="${safe_status//$'\r'/'%0D'}"
+              safe_status="${safe_status//$'\n'/'%0A'}"
+              echo "::error title=Target validation evidence is incomplete::${safe_status}. Prerelease and release publication are intentionally blocked. Select build_only to create candidate artifacts without publishing."
+              exit 1
+            fi
             git cat-file -e "${build_commit}^{commit}"
           fi
           echo "build_commit=${build_commit}" >> "$GITHUB_OUTPUT"
