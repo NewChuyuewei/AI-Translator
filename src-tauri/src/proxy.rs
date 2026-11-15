@@ -7,11 +7,9 @@ use tauri::AppHandle;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::watch};
 use url::Host;
 pub use translator_core::ProxyMode;
+pub use translator_core::proxy::ProxyRoute as Route;
 use translator_core::{
-    proxy::{
-        ProxyDestination as Destination, ProxyEndpoint as Proxy, ProxyKind as Kind,
-        ProxyRoute as Route,
-    },
+    proxy::{ProxyDestination as Destination, ProxyEndpoint as Proxy, ProxyKind as Kind},
     proxy_handshake::{
         SocksAuthMethod, SocksReplyAddress, http_connect_request, parse_http_connect_response,
         parse_socks_auth_response, parse_socks_method, parse_socks_reply_prefix,
