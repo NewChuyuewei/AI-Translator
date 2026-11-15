@@ -122,8 +122,8 @@ v2.1.0 迁移目标固定使用 Rust 1.100.0、edition 2024 与 Slint 1.18.1。�
 验证并运行迁移壳层：
 
 ```bash
-cargo test --workspace --all-targets
-cargo run -p translator-desktop
+cargo test --workspace --all-targets --locked
+cargo run -p translator-desktop --locked
 ```
 
 当前生产入口还需要 Node.js `^22.22.2` 或 `>=24.15.0`、Rust 以及对应平台的 [Tauri 2 前置依赖](https://v2.tauri.app/start/prerequisites/)。
@@ -168,7 +168,7 @@ npm run build
 npm run test:ui
 npm run test:version
 npm run test:android-config
-cargo test --workspace --all-targets
+cargo test --workspace --all-targets --locked
 cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 gradle -p android testDebugUnitTest assembleDebug
 ```

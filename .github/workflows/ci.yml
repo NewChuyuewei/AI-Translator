@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,7 +43,7 @@ jobs:
       - run: npm run test:android-config
       - name: Test Rust workspace and compile Slint desktop
         run: |
-          if cargo test --workspace --all-targets >workspace-test.log 2>&1; then
+          if cargo test --workspace --all-targets --locked >workspace-test.log 2>&1; then
             cat workspace-test.log
           else
             cat workspace-test.log
@@ -54,15 +54,6 @@ jobs:
             echo "::error title=Rust workspace tests failed::${details}"
             exit 1
           fi
-      - name: Commit initial workspace lockfile
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/')
-        run: |
-          if git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then exit 0; fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add Cargo.lock
-          git commit -m "build: lock Slint workspace dependencies"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
       - name: Run legacy Tauri adapter tests
         run: |
           if cargo test --manifest-path src-tauri/Cargo.toml --lib --locked >rust-test.log 2>&1; then
