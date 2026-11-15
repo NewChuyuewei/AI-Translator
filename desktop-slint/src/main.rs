@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 slint::include_modules!();
 
 use slint::ComponentHandle;
@@ -5,16 +7,29 @@ use translator_core::{
     AudioSourceMode, ModelKind, ProxyMode, SessionOptions, ThinkingLevel, TranscriptionMode,
 };
 
-fn selected<T: Copy>(index: i32, values: &[T]) -> T {
-    values.get(index.max(0) as usize).copied().unwrap_or(values[0])
+fn selected<T: Copy>(index: i32, values: &[T], safe_default: T) -> T {
+    values
+        .get(index.max(0) as usize)
+        .copied()
+        .unwrap_or(safe_default)
 }
 
 fn options_from_ui(ui: &ControlWindow) -> SessionOptions {
-    let model = selected(ui.get_model_index(), &[
-        ModelKind::GeneralLive, ModelKind::ExtendedThinking,
-        ModelKind::LiveTranslate35, ModelKind::TranscribeLive35,
-    ]);
-    let target = selected(ui.get_target_index(), &["zh", "en", "ja", "ko", "es", "fr", "de", "it"]);
+    let model = selected(
+        ui.get_model_index(),
+        &[
+            ModelKind::GeneralLive,
+            ModelKind::ExtendedThinking,
+            ModelKind::LiveTranslate35,
+            ModelKind::TranscribeLive35,
+        ],
+        ModelKind::GeneralLive,
+    );
+    let target = selected(
+        ui.get_target_index(),
+        &["zh", "en", "ja", "ko", "es", "fr", "de", "it"],
+        "zh",
+    );
     SessionOptions {
         api_key: ui.get_api_key().to_string(),
         model,
@@ -22,16 +37,30 @@ fn options_from_ui(ui: &ControlWindow) -> SessionOptions {
         thinking_level: ThinkingLevel::Low,
         transcription_mode: TranscriptionMode::Verbatim,
         bidirectional: ui.get_bidirectional(),
-        other_language: if target == "en" { "zh".into() } else { "en".into() },
-        mode: selected(ui.get_source_index(), &[
-            AudioSourceMode::MicrophoneOnly, AudioSourceMode::SystemAudioOnly, AudioSourceMode::Mixed,
-        ]),
+        other_language: if target == "en" {
+            "zh".into()
+        } else {
+            "en".into()
+        },
+        mode: selected(
+            ui.get_source_index(),
+            &[
+                AudioSourceMode::MicrophoneOnly,
+                AudioSourceMode::SystemAudioOnly,
+                AudioSourceMode::Mixed,
+            ],
+            AudioSourceMode::MicrophoneOnly,
+        ),
         microphone_device: None,
         system_device: None,
         playback_enabled: ui.get_playback_enabled() && !model.is_transcription_only(),
         playback_device: None,
         token_saver: ui.get_token_saver(),
-        proxy_mode: selected(ui.get_proxy_index(), &[ProxyMode::Auto, ProxyMode::Manual, ProxyMode::Direct]),
+        proxy_mode: selected(
+            ui.get_proxy_index(),
+            &[ProxyMode::Auto, ProxyMode::Manual, ProxyMode::Direct],
+            ProxyMode::Auto,
+        ),
         proxy_url: ui.get_proxy_url().to_string(),
         overlay_scale: ui.get_overlay_scale() as f64,
     }

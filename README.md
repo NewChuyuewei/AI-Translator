@@ -268,6 +268,9 @@ gradle -p android testDebugUnitTest assembleDebug
 ## 📚 文档
 
 - [PC 端 Rust + Slint 与 v2.1.0–v3.0.0 低延迟路线图](docs/PC_RUST_SLINT_ROADMAP.md)
+- [DO-178C 软件保证计划与声明边界](docs/assurance/DO_178C_PLAN.md)
+- [软件需求与双向追踪](docs/assurance/SOFTWARE_REQUIREMENTS.md)
+- [Rust 与 Slint 编码标准](docs/assurance/CODING_STANDARD.md)
 - [Android 原生工程说明](android/README.md)
 - [Android Kotlin 迁移计划](docs/ANDROID_KOTLIN_MIGRATION.md)
 - [技术栈与升级策略](docs/TECH_STACK.md)
