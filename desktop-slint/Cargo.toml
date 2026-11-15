@@ -17,6 +17,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 caption-platform = { path = "../crates/caption-platform" }
 cpal.workspace = true
+desktop-lifecycle = { path = "../crates/desktop-lifecycle" }
 futures-util.workspace = true
 proxyres.workspace = true
 rustls.workspace = true

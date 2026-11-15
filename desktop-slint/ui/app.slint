@@ -1,5 +1,34 @@
 import { Button, CheckBox, ComboBox, LineEdit, Slider, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
+export component AppTray inherits SystemTrayIcon {
+    icon: @image-url("../assets/tray.png");
+    tooltip: root.session-running ? "Gemini Live Translator · 运行中" : "Gemini Live Translator";
+    title: "Gemini Live Translator";
+
+    in-out property <bool> session-running: false;
+    callback show-control();
+    callback toggle-session();
+    callback quit-requested();
+
+    clicked => { root.show-control(); }
+
+    Menu {
+        MenuItem {
+            title: "显示控制窗口";
+            activated => { root.show-control(); }
+        }
+        MenuItem {
+            title: root.session-running ? "停止翻译" : "开始翻译";
+            activated => { root.toggle-session(); }
+        }
+        MenuSeparator {}
+        MenuItem {
+            title: "退出";
+            activated => { root.quit-requested(); }
+        }
+    }
+}
+
 export component CaptionWindow inherits Window {
     title: "Gemini Live Translator · 字幕";
     width: 760px;

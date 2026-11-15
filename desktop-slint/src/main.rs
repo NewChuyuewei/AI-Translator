@@ -15,6 +15,7 @@ mod native_transport;
 use anyhow::anyhow;
 use caption_platform::MousePassthrough;
 use config_store::ConfigStore;
+use desktop_lifecycle::{InstanceError, InstanceGuard};
 use device_provider::NativeDeviceProvider;
 use native_diagnostics::NativeDiagnostics;
 use native_session::NativeSessionPort;
@@ -269,9 +270,27 @@ fn apply_caption_lock(
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    let lock_path = match ConfigStore::prepare_instance_lock() {
+        Ok(path) => path,
+        Err(_) => {
+            eprintln!("无法建立单实例保护；已拒绝启动");
+            return Ok(());
+        }
+    };
+    let _instance_guard = match InstanceGuard::acquire(&lock_path) {
+        Ok(guard) => guard,
+        Err(InstanceError::AlreadyRunning) => return Ok(()),
+        Err(InstanceError::NativeOperationFailed) => {
+            eprintln!("无法建立单实例保护；已拒绝启动");
+            return Ok(());
+        }
+    };
+
     let control = ControlWindow::new()?;
     let caption = CaptionWindow::new()?;
+    let tray = AppTray::new()?;
     caption.show()?;
+    tray.show()?;
 
     let config = match ConfigStore::discover() {
         Ok(store) => {
@@ -601,8 +620,30 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // SWR-NLIFE-001: native close hides to tray; only explicit Quit tears
+    // down the event loop and active resources.
+    control
+        .window()
+        .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+
+    let control_weak = control.as_weak();
+    tray.on_show_control(move || {
+        if let Some(ui) = control_weak.upgrade() {
+            let _ = ui.show();
+            ui.window().request_redraw();
+        }
+    });
+
+    let control_weak = control.as_weak();
+    tray.on_toggle_session(move || {
+        if let Some(ui) = control_weak.upgrade() {
+            ui.invoke_start_stop();
+        }
+    });
+
     let event_control = control.as_weak();
     let event_caption = caption.as_weak();
+    let event_tray = tray.as_weak();
     let event_session = Rc::clone(&session);
     let event_diagnostics = Rc::clone(&diagnostics);
     let session_timer = Timer::default();
@@ -619,6 +660,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         LogLevel::Info
                     };
                     event_diagnostics.borrow().record(level, &status.message);
+                    if let Some(tray) = event_tray.upgrade() {
+                        tray.set_session_running(status.phase.is_active());
+                    }
                     if let Some(ui) = event_control.upgrade() {
                         ui.set_session_running(status.phase.is_active());
                         ui.set_status_message(status.message.into());
@@ -647,7 +691,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let quit_cancel = Arc::clone(&probe_cancel);
     let quit_session = Rc::clone(&session);
-    control.on_quit_requested(move || {
+    let request_quit = Rc::new(move || {
         quit_cancel.store(true, Ordering::Release);
         let session_active = quit_session.borrow().phase().is_active();
         if session_active {
@@ -656,7 +700,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let _ = slint::quit_event_loop();
     });
 
-    control.run()
+    let control_quit = Rc::clone(&request_quit);
+    control.on_quit_requested(move || control_quit());
+    let tray_quit = Rc::clone(&request_quit);
+    tray.on_quit_requested(move || tray_quit());
+
+    control.show()?;
+    slint::run_event_loop()
 }
 
 #[cfg(test)]

@@ -1,0 +1,9 @@
+[package]
+name = "desktop-lifecycle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file = "../../COPYRIGHT"
+repository.workspace = true
+description = "Native single-instance and desktop lifecycle primitives"
