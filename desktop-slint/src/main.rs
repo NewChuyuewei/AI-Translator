@@ -531,14 +531,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let initial_caption = caption.as_weak();
     let initial_input = Rc::clone(&caption_input);
     Timer::single_shot(Duration::from_millis(1), move || {
-        let (Some(ui), Some(window)) = (initial_control.upgrade(), initial_caption.upgrade()) else {
+        let (Some(ui), Some(window)) = (initial_control.upgrade(), initial_caption.upgrade())
+        else {
             return;
         };
         let locked = ui.get_overlay_locked();
         if let Err(error) = apply_caption_lock(&window, &mut initial_input.borrow_mut(), locked) {
-            ui.set_status_message(
-                format!("字幕窗保持可交互的安全状态：{error}").into(),
-            );
+            ui.set_status_message(format!("字幕窗保持可交互的安全状态：{error}").into());
         }
     });
 
@@ -550,11 +549,7 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         };
         let requested_lock = !ui.get_overlay_locked();
-        match apply_caption_lock(
-            &window,
-            &mut callback_input.borrow_mut(),
-            requested_lock,
-        ) {
+        match apply_caption_lock(&window, &mut callback_input.borrow_mut(), requested_lock) {
             Ok(()) => {
                 ui.set_overlay_locked(requested_lock);
                 ui.set_status_message(if requested_lock {
@@ -566,9 +561,7 @@ fn main() -> Result<(), slint::PlatformError> {
             Err(error) if requested_lock => {
                 // Fail closed: lock movement but never claim pass-through.
                 ui.set_overlay_locked(true);
-                ui.set_status_message(
-                    format!("字幕窗已锁定但保持可交互：{error}").into(),
-                );
+                ui.set_status_message(format!("字幕窗已锁定但保持可交互：{error}").into());
             }
             Err(error) => {
                 // A failed disable must not create a false unlocked state.
