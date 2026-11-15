@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use zeroize::Zeroize;
 
+pub mod diagnostics;
 pub mod protocol;
 pub mod server_protocol;
 pub mod session_driver;
