@@ -12,7 +12,14 @@ use anyhow::anyhow;
 use config_store::ConfigStore;
 use device_provider::NativeDeviceProvider;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 use translator_core::{
     AudioSourceMode, ModelKind, ProxyMode, SessionOptions, SessionPhase, ThinkingLevel,
     TranscriptionMode,
@@ -246,6 +253,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let session = Rc::new(RefCell::new(PendingNativeSessionPort));
     let device_provider = Rc::new(RefCell::new(NativeDeviceProvider));
     let devices = Rc::new(RefCell::new(AudioDevices::default()));
+    let probe_cancel = Arc::new(AtomicBool::new(false));
     match device_provider.borrow_mut().refresh() {
         Ok(snapshot) => {
             apply_devices(&control, &snapshot);
@@ -273,13 +281,17 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let weak = control.as_weak();
     let callback_devices = Rc::clone(&devices);
+    let callback_cancel = Arc::clone(&probe_cancel);
     control.on_probe_transport(move || {
         let Some(ui) = weak.upgrade() else {
             return;
         };
         if ui.get_probe_running() {
+            callback_cancel.store(true, Ordering::Release);
+            ui.set_status_message("正在取消网络验证…".into());
             return;
         }
+        callback_cancel.store(false, Ordering::Release);
         let options = options_from_ui(&ui, &callback_devices.borrow());
         if let Err(error) = callback_devices.borrow().validate_selection(&options) {
             ui.set_status_message(error.to_string().into());
@@ -288,8 +300,9 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.set_probe_running(true);
         ui.set_status_message("正在验证代理、TLS、WebSocket 和 setup；不会打开或上传音频".into());
         let thread_weak = weak.clone();
+        let thread_cancel = Arc::clone(&callback_cancel);
         std::thread::spawn(move || {
-            let result = native_transport::probe_blocking(options);
+            let result = native_transport::probe_blocking(options, thread_cancel);
             let _ = thread_weak.upgrade_in_event_loop(move |ui| {
                 ui.set_probe_running(false);
                 match result {
@@ -461,7 +474,9 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    control.on_quit_requested(|| {
+    let quit_cancel = Arc::clone(&probe_cancel);
+    control.on_quit_requested(move || {
+        quit_cancel.store(true, Ordering::Release);
         let _ = slint::quit_event_loop();
     });
 

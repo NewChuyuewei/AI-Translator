@@ -61,6 +61,7 @@
 | SWR-NTRANS-002 | `WebSocketConfig` 上限及分阶段 timeout | workspace 编译、代码评审；故障注入待办 `ASSURANCE-NET-001` |
 | SWR-NTRANS-003 | `resolve_route`、`open_route`、核心握手函数 | 核心 SWR-ROUTE/TUN 测试、旧异步隧道测试 |
 | SWR-NTRANS-004 | Slint `probe-transport` 后台线程、`probe-running` 门和安全错误映射 | 代码评审；UI 驱动待办 `ASSURANCE-UI-003` |
+| SWR-NTRANS-005 | `ProbeCancel`、分阶段 `tokio::select!`、可取消平台代理等待 | `swr_ntrans_005_setup_wait_is_cancellable`、退出回调代码评审 |
 
 ## 开放验证项
 
