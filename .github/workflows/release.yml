@@ -97,7 +97,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install nsis --no-progress -y
           $version = "${env:RELEASE_TAG}".TrimStart('v')
           $payload = Join-Path $env:RUNNER_TEMP "slint-windows-payload"
           $portable = Join-Path $env:RUNNER_TEMP "Gemini-Live-Translator-$version-Windows-portable"
@@ -108,8 +107,7 @@ jobs:
           Copy-Item "COPYRIGHT" (Join-Path $portable "COPYRIGHT.txt")
           Compress-Archive -Path "$portable/*" -DestinationPath "release-assets/Gemini-Live-Translator-$version-Windows-portable.zip" -CompressionLevel Optimal
           $installer = (Resolve-Path "release-assets").Path + "\Gemini-Live-Translator-$version-Windows-Setup.exe"
-          $makensis = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
-          if (-not (Test-Path $makensis)) { throw "NSIS compiler was not installed at $makensis" }
+          $makensis = (Get-Command makensis.exe -ErrorAction Stop).Source
           & $makensis "/DINPUT_DIR=$payload" "/DOUTPUT_FILE=$installer" "packaging/windows-installer.nsi"
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
       - name: Stage signed-layout macOS application and DMG

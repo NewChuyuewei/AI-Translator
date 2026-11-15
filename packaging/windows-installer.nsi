@@ -1,6 +1,5 @@
-; Per-user Windows x64 installer for the GNU cross-compiled portable build.
-; Linux: LC_ALL=C.UTF-8 makensis -INPUTCHARSET UTF8 -DINPUT_DIR=/path/to/payload \
-;   -DOUTPUT_FILE=/path/to/Gemini-Live-Translator-Setup.exe packaging/windows-installer.nsi
+; Per-user Windows x64 installer for the native Slint release binary.
+; Invoke on Windows with UTF-8 NSIS and INPUT_DIR/OUTPUT_FILE definitions.
 Unicode true
 RequestExecutionLevel user
 
