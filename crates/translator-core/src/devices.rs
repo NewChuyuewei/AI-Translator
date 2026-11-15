@@ -1,6 +1,6 @@
 //! Bounded audio-device snapshots shared by desktop adapters and UI.
 
-use crate::{AudioSourceMode, SessionOptions};
+use crate::SessionOptions;
 use anyhow::{Result, anyhow};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -168,7 +168,7 @@ fn bounded_text(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ModelKind, ProxyMode, ThinkingLevel, TranscriptionMode};
+    use crate::{AudioSourceMode, ModelKind, ProxyMode, ThinkingLevel, TranscriptionMode};
 
     fn device(id: &str, default: bool) -> AudioDeviceInfo {
         AudioDeviceInfo {
