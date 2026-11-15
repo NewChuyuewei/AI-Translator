@@ -11,6 +11,7 @@ const files = [
   'package.json',
   'package-lock.json',
   'Cargo.toml',
+  'Cargo.lock',
   'src-tauri/tauri.conf.json',
   'src-tauri/tauri.android.conf.json',
   'android/app/build.gradle.kts',
@@ -50,6 +51,10 @@ try {
 
   const workspaceCargo = fs.readFileSync(path.join(workspace, 'Cargo.toml'), 'utf8');
   assert.match(workspaceCargo, /\[workspace\.package\][\s\S]*?version\s*=\s*"7\.8\.9"/);
+  const workspaceLock = fs.readFileSync(path.join(workspace, 'Cargo.lock'), 'utf8');
+  for (const crate of ['translator-core', 'translator-desktop']) {
+    assert.match(workspaceLock, new RegExp(`\\[\\[package\\]\\]\\r?\\nname = "${crate}"\\r?\\nversion = "7\\.8\\.9"`));
+  }
   const cargoToml = fs.readFileSync(path.join(workspace, 'src-tauri/Cargo.toml'), 'utf8');
   const cargoLock = fs.readFileSync(path.join(workspace, 'src-tauri/Cargo.lock'), 'utf8');
   assert.match(cargoToml, /\[package\][\s\S]*?version\s*=\s*"7\.8\.9"/);
