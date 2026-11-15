@@ -8,6 +8,7 @@
 | SWR-CORE-004 | `validate_manual_proxy`、Tauri `Trace::redact` | `swr_core_004_proxy_errors_never_echo_credentials` 及旧 Tauri 脱敏测试 |
 | SWR-CORE-005 | serde rename/alias 契约 | `swr_core_005_serialized_contract_remains_compatible_with_existing_settings`、前端 mock 测试 |
 | SWR-UI-001 | `desktop-slint/src/main.rs` 的适配器未接入安全拒绝路径 | Slint workspace 编译；UI 集成测试待办 `ASSURANCE-UI-001` |
+| SWR-NUI-001 | Slint `thinking-index`/`transcription-index`、设置恢复和活动会话禁用门 | `swr_nui_001_protocol_option_indices_round_trip`、属性绑定代码评审 |
 | SWR-CFG-001 | `scripts/set-version.mjs`、`scripts/check-version.mjs` | `tests/version_script_test.mjs`、CI version gate |
 | SWR-PROTO-001 | `translator_core::protocol::setup`、`LiveProtocolConfig` | `swr_proto_001_setup_is_model_specific_and_contains_no_credentials`、旧 WebSocket setup 测试 |
 | SWR-PROTO-002 | `protocol::setup` 的模型专属分支 | `swr_proto_002_translation_and_transcription_semantics_are_distinct`、旧精确 setup 回归测试 |

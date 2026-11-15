@@ -71,9 +71,21 @@ fn options_from_ui(ui: &ControlWindow, devices: &AudioDevices) -> SessionOptions
         api_key: ui.get_api_key().to_string(),
         model,
         target_language: target.into(),
-        thinking_level: ThinkingLevel::Low,
-        transcription_mode: TranscriptionMode::Verbatim,
-        bidirectional: ui.get_bidirectional(),
+        thinking_level: selected(
+            ui.get_thinking_index(),
+            &[
+                ThinkingLevel::Low,
+                ThinkingLevel::Medium,
+                ThinkingLevel::High,
+            ],
+            ThinkingLevel::Low,
+        ),
+        transcription_mode: selected(
+            ui.get_transcription_index(),
+            &[TranscriptionMode::Verbatim, TranscriptionMode::Smart],
+            TranscriptionMode::Verbatim,
+        ),
+        bidirectional: ui.get_bidirectional() && model.supports_bidirectional_instruction(),
         other_language: if target == "en" {
             "zh".into()
         } else {
@@ -124,6 +136,18 @@ fn apply_settings(ui: &ControlWindow, settings: &PersistedSettings) {
     ui.set_target_index(index_of(
         &options.target_language.as_str(),
         &["zh", "en", "ja", "ko", "es", "fr", "de", "it"],
+    ));
+    ui.set_thinking_index(index_of(
+        &options.thinking_level,
+        &[
+            ThinkingLevel::Low,
+            ThinkingLevel::Medium,
+            ThinkingLevel::High,
+        ],
+    ));
+    ui.set_transcription_index(index_of(
+        &options.transcription_mode,
+        &[TranscriptionMode::Verbatim, TranscriptionMode::Smart],
     ));
     ui.set_source_index(index_of(
         &options.mode,
@@ -513,6 +537,27 @@ mod tests {
             id: id.into(),
             name: id.into(),
             is_default: false,
+        }
+    }
+
+    #[test]
+    fn swr_nui_001_protocol_option_indices_round_trip() {
+        let thinking = [
+            ThinkingLevel::Low,
+            ThinkingLevel::Medium,
+            ThinkingLevel::High,
+        ];
+        let transcription = [TranscriptionMode::Verbatim, TranscriptionMode::Smart];
+        for (index, value) in thinking.into_iter().enumerate() {
+            assert_eq!(index_of(&value, &thinking), index as i32);
+            assert_eq!(selected(index as i32, &thinking, ThinkingLevel::Low), value);
+        }
+        for (index, value) in transcription.into_iter().enumerate() {
+            assert_eq!(index_of(&value, &transcription), index as i32);
+            assert_eq!(
+                selected(index as i32, &transcription, TranscriptionMode::Verbatim),
+                value
+            );
         }
     }
 
