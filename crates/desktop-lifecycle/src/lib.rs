@@ -43,7 +43,11 @@ fn acquire(_lock_path: &Path) -> Result<InstanceGuard, InstanceError> {
     #[link(name = "kernel32")]
     #[allow(non_snake_case)]
     unsafe extern "system" {
-        fn CreateMutexW(attributes: *const c_void, initial_owner: i32, name: *const u16) -> *mut c_void;
+        fn CreateMutexW(
+            attributes: *const c_void,
+            initial_owner: i32,
+            name: *const u16,
+        ) -> *mut c_void;
         fn CloseHandle(handle: *mut c_void) -> i32;
         fn GetLastError() -> u32;
     }
