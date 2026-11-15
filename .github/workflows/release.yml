@@ -155,6 +155,10 @@ jobs:
             libayatana-appindicator3-dev pkg-config
       - name: Build native Slint desktop
         run: cargo build --release --locked -p translator-desktop
+      - name: Verify Windows GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-windows-gui.ps1 target/release/gemini-live-translator.exe
       - name: Stage Windows portable ZIP and NSIS installer
         if: runner.os == 'Windows'
         shell: pwsh

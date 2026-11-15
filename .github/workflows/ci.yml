@@ -91,6 +91,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build native Slint release binary
         run: cargo build --release --locked -p translator-desktop
+      - name: Verify Windows GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-windows-gui.ps1 target/release/gemini-live-translator.exe
       - name: Run platform workspace tests
         run: cargo test --workspace --locked
 
