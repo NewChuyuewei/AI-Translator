@@ -273,9 +273,8 @@ impl PlatformHotkey {
                     let mut message = std::mem::MaybeUninit::<Message>::uninit();
                     // SAFETY: GetMessageW initializes Message before a positive
                     // return. The pointer is valid for the duration of the call.
-                    let result = unsafe {
-                        GetMessageW(message.as_mut_ptr(), std::ptr::null_mut(), 0, 0)
-                    };
+                    let result =
+                        unsafe { GetMessageW(message.as_mut_ptr(), std::ptr::null_mut(), 0, 0) };
                     if result <= 0 {
                         break;
                     }
@@ -311,8 +310,12 @@ impl Drop for PlatformHotkey {
         #[link(name = "user32")]
         #[allow(non_snake_case)]
         unsafe extern "system" {
-            fn PostThreadMessageW(thread_id: u32, message: u32, w_param: usize, l_param: isize)
-                -> i32;
+            fn PostThreadMessageW(
+                thread_id: u32,
+                message: u32,
+                w_param: usize,
+                l_param: isize,
+            ) -> i32;
         }
         // SAFETY: thread_id belongs to the live helper thread. Failure is
         // harmless during process teardown; join still preserves ownership.
