@@ -118,8 +118,8 @@ async fn probe_endpoint(
         bidirectional: options.bidirectional,
         other_language: options.other_language.clone(),
     };
-    let mut driver = SessionDriver::new(config);
-    let setup = driver.setup()?;
+    let mut driver = SessionDriver::new(&config);
+    let setup = driver.setup_message().to_owned();
     tokio::time::timeout(
         Duration::from_secs(10),
         socket.send(Message::Text(setup.into())),
@@ -148,7 +148,7 @@ async fn probe_endpoint(
                 }
                 Message::Pong(_) | Message::Frame(_) => continue,
             };
-            if matches!(event, DriverEvent::SetupCompleted) {
+            if matches!(event, DriverEvent::SetupComplete) {
                 return Ok(());
             }
         }
