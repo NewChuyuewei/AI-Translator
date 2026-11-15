@@ -8,7 +8,10 @@ use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::watch};
 use url::Host;
 pub use translator_core::ProxyMode;
 use translator_core::{
-    proxy::{ProxyEndpoint as Proxy, ProxyKind as Kind},
+    proxy::{
+        ProxyDestination as Destination, ProxyEndpoint as Proxy, ProxyKind as Kind,
+        ProxyRoute as Route,
+    },
     proxy_handshake::{
         SocksAuthMethod, SocksReplyAddress, http_connect_request, parse_http_connect_response,
         parse_socks_auth_response, parse_socks_method, parse_socks_reply_prefix,
@@ -21,20 +24,6 @@ use translator_core::{
 // no API key or other secret is included in the URL supplied to the resolver.
 pub const PROXY_TARGET: &str = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
-#[derive(Clone)]
-enum Destination { Direct, Proxy(Proxy) }
-
-#[derive(Clone)]
-pub struct Route { destination: Destination, label: &'static str }
-impl Route {
-    fn direct(label: &'static str) -> Self { Self { destination: Destination::Direct, label } }
-    fn via(proxy: Proxy, automatic: bool) -> Self {
-        let label = proxy.safe_label(automatic);
-        Self { destination: Destination::Proxy(proxy), label }
-    }
-    pub fn label(&self) -> &'static str { self.label }
-}
-
 fn parse_proxy(value: &str) -> Result<Proxy> {
     Proxy::parse(value)
 }
@@ -46,11 +35,7 @@ pub fn validate(mode: ProxyMode, address: &str) -> Result<()> {
 
 #[cfg(not(target_os = "android"))]
 fn from_resolver_value(value: &str) -> Result<Route> {
-    let value = value.trim();
-    if value.eq_ignore_ascii_case("direct://") || value.eq_ignore_ascii_case("direct:///") {
-        return Ok(Route::direct("系统网络（未检测到显式代理；可能经过 VPN）"));
-    }
-    Ok(Route::via(parse_proxy(value).context("系统代理类型或地址无法使用；请尝试手动代理")?, true))
+    Route::automatic_resolver_value(value)
 }
 
 #[cfg(not(target_os = "android"))]
@@ -77,7 +62,7 @@ struct AndroidProxy { kind: String, host: Option<String>, port: Option<u16> }
 #[cfg(any(target_os = "android", test))]
 fn android_proxy(value: serde_json::Value) -> Result<Route> {
     let selected: AndroidProxy = serde_json::from_value(value).map_err(|_| anyhow!("Android 系统代理信息无效；请尝试手动代理"))?;
-    if selected.kind == "direct" { return Ok(Route::direct("系统网络（未检测到显式代理；可能经过 VPN）")); }
+    if selected.kind == "direct" { return Ok(Route::automatic_direct()); }
     let kind = match selected.kind.as_str() {
         "http" => Kind::Http,
         "socks5" => Kind::Socks5,
@@ -100,8 +85,8 @@ fn android_proxy(value: serde_json::Value) -> Result<Route> {
 
 pub async fn resolve(app: &AppHandle, mode: ProxyMode, address: &str, cancel: &mut watch::Receiver<bool>) -> Result<Route> {
     match mode {
-        ProxyMode::Direct => Ok(Route::direct("系统网络（不使用显式代理；仍可能经过 VPN）")),
-        ProxyMode::Manual => Ok(Route::via(parse_proxy(address)?, false)),
+        ProxyMode::Direct => Ok(Route::explicit_direct()),
+        ProxyMode::Manual => Route::manual(address),
         ProxyMode::Auto => {
             #[cfg(not(target_os = "android"))]
             {
@@ -186,9 +171,9 @@ pub async fn open(route: &Route, host: &str, port: u16) -> Result<TcpStream> {
 }
 
 #[cfg(test)]
-pub(crate) fn direct_for_test() -> Route { Route::direct("test") }
+pub(crate) fn direct_for_test() -> Route { Route::explicit_direct() }
 #[cfg(test)]
-pub(crate) fn manual_for_test(url: &str) -> Result<Route> { Ok(Route::via(parse_proxy(url)?, false)) }
+pub(crate) fn manual_for_test(url: &str) -> Result<Route> { Route::manual(url) }
 
 #[cfg(test)]
 mod tests {

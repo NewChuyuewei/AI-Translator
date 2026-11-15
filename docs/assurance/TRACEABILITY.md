@@ -54,6 +54,9 @@
 | SWR-TUN-002 | `parse_http_connect_response`、`MAX_HTTP_CONNECT_HEADER_BYTES` | `swr_tun_002_http_response_is_bounded_and_status_allowlisted` |
 | SWR-TUN-003 | SOCKS greeting/method/auth/connect 纯函数 | `swr_tun_003_socks_auth_and_remote_dns_are_exact`、旧 SOCKS5 远端 DNS 测试 |
 | SWR-TUN-004 | `parse_socks_reply_prefix`、`socks_reply_tail_len` | `swr_tun_004_socks_reply_shapes_are_deterministic`、旧 IPv6 响应测试 |
+| SWR-ROUTE-001 | `ProxyRoute::immediate`、`ProxyDestination` | `swr_route_001_direct_and_manual_modes_resolve_without_platform_access` |
+| SWR-ROUTE-002 | `ProxyRoute::automatic_resolver_value`、Tauri 首选值策略 | `swr_route_002_auto_requires_one_platform_selected_value`、旧无直连回退隧道测试 |
+| SWR-ROUTE-003 | 自动值安全上下文映射 | `swr_route_003_invalid_auto_value_has_fixed_context_without_secrets` |
 
 ## 开放验证项
 
