@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use zeroize::Zeroize;
 
+pub mod devices;
 pub mod diagnostics;
 pub mod protocol;
 pub mod server_protocol;

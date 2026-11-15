@@ -13,6 +13,7 @@ use std::{cell::RefCell, rc::Rc};
 use translator_core::{
     AudioSourceMode, ModelKind, ProxyMode, SessionOptions, SessionPhase, ThinkingLevel,
     TranscriptionMode,
+    devices::{AudioDevices, DeviceProvider},
     session_port::{SessionPort, UiEvent},
     settings::PersistedSettings,
     vault::SecretPayload,
@@ -23,6 +24,15 @@ use zeroize::Zeroize;
 /// the real socket/audio runtime remains disabled until its adapter is proven.
 #[derive(Default)]
 struct PendingNativeSessionPort;
+
+#[derive(Default)]
+struct PendingNativeDeviceProvider;
+
+impl DeviceProvider for PendingNativeDeviceProvider {
+    fn refresh(&mut self) -> anyhow::Result<AudioDevices> {
+        Err(anyhow!("原生设备适配器尚未完成验证；未打开任何音频设备"))
+    }
+}
 
 impl SessionPort for PendingNativeSessionPort {
     fn start(&mut self, options: &SessionOptions) -> anyhow::Result<()> {
@@ -169,6 +179,7 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let session = Rc::new(RefCell::new(PendingNativeSessionPort));
+    let devices = Rc::new(RefCell::new(PendingNativeDeviceProvider));
     let weak = control.as_weak();
     let callback_session = Rc::clone(&session);
     control.on_start_stop(move || {
@@ -291,9 +302,21 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let weak = control.as_weak();
+    let callback_devices = Rc::clone(&devices);
     control.on_refresh_devices(move || {
-        if let Some(ui) = weak.upgrade() {
-            ui.set_status_message("设备适配器尚未接入；旧 Tauri 入口仍负责生产会话。".into());
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        match callback_devices.borrow_mut().refresh() {
+            Ok(snapshot) => ui.set_status_message(
+                format!(
+                    "已刷新 {} 个有界设备（平台 {}）",
+                    snapshot.total_count(),
+                    snapshot.platform
+                )
+                .into(),
+            ),
+            Err(error) => ui.set_status_message(error.to_string().into()),
         }
     });
 
