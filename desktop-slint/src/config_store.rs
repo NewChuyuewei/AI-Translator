@@ -24,6 +24,18 @@ pub struct ConfigStore {
 }
 
 impl ConfigStore {
+    pub fn prepare_instance_lock() -> Result<PathBuf> {
+        let root = platform_config_base()?.join(APP_IDENTIFIER);
+        fs::create_dir_all(&root).context("无法创建应用运行目录")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+                .context("无法限制应用运行目录权限")?;
+        }
+        Ok(root.join("desktop.lock"))
+    }
+
     /// SWR-NCFG-001: resolve the same identifier-based directory used by the
     /// legacy desktop without silently falling back to the working directory.
     pub fn discover() -> Result<Self> {
