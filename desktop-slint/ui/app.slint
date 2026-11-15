@@ -37,6 +37,8 @@ export component ControlWindow inherits Window {
     in-out property <string> vault-password: "";
     in-out property <int> model-index: 0;
     in-out property <int> target-index: 0;
+    in-out property <int> thinking-index: 0;
+    in-out property <int> transcription-index: 0;
     in-out property <int> source-index: 0;
     in-out property <[string]> microphone-model: ["系统默认麦克风"];
     in-out property <[string]> system-model: ["系统默认音频源"];
@@ -94,15 +96,30 @@ export component ControlWindow inherits Window {
         HorizontalBox {
             spacing: 10px;
             ComboBox {
+                enabled: !root.session-running;
                 current-index <=> root.model-index;
                 model: ["Gemini 3.8 Live", "3.8 Extended Thinking", "3.5 Live Translate", "3.5 Transcribe Live"];
             }
             ComboBox {
+                enabled: !root.session-running;
                 current-index <=> root.target-index;
                 model: ["中文", "English", "日本語", "한국어", "Español", "Français", "Deutsch", "Italiano"];
             }
         }
-        CheckBox { text: "双向自动切换"; checked <=> root.bidirectional; }
+        HorizontalBox {
+            spacing: 10px;
+            ComboBox {
+                enabled: root.model-index == 1 && !root.session-running;
+                current-index <=> root.thinking-index;
+                model: ["思考等级：低", "思考等级：中", "思考等级：高"];
+            }
+            ComboBox {
+                enabled: root.model-index == 3 && !root.session-running;
+                current-index <=> root.transcription-index;
+                model: ["逐字转写", "智能整理"];
+            }
+        }
+        CheckBox { enabled: root.model-index <= 1 && !root.session-running; text: "双向自动切换"; checked <=> root.bidirectional; }
         HorizontalBox {
             spacing: 10px;
             ComboBox { current-index <=> root.proxy-index; model: ["自动代理 / VPN", "手动代理", "系统网络直连"]; }
@@ -113,19 +130,19 @@ export component ControlWindow inherits Window {
         Text { text: "02 音频与设备"; color: #14242c; font-size: 17px; font-weight: 700; }
         HorizontalBox {
             spacing: 10px;
-            ComboBox { current-index <=> root.source-index; model: ["麦克风", "系统音频", "混合音源"]; }
-            Button { text: "刷新设备"; clicked => { root.refresh-devices(); } }
+            ComboBox { enabled: !root.session-running; current-index <=> root.source-index; model: ["麦克风", "系统音频", "混合音源"]; }
+            Button { enabled: !root.session-running; text: "刷新设备"; clicked => { root.refresh-devices(); } }
         }
         HorizontalBox {
             spacing: 8px;
-            ComboBox { enabled: root.source-index != 1; current-index <=> root.microphone-index; model: root.microphone-model; }
-            ComboBox { enabled: root.source-index != 0; current-index <=> root.system-index; model: root.system-model; }
-            ComboBox { enabled: root.playback-enabled && root.model-index != 3; current-index <=> root.playback-index; model: root.playback-model; }
+            ComboBox { enabled: !root.session-running && root.source-index != 1; current-index <=> root.microphone-index; model: root.microphone-model; }
+            ComboBox { enabled: !root.session-running && root.source-index != 0; current-index <=> root.system-index; model: root.system-model; }
+            ComboBox { enabled: !root.session-running && root.playback-enabled && root.model-index != 3; current-index <=> root.playback-index; model: root.playback-model; }
         }
         HorizontalBox {
             spacing: 20px;
-            CheckBox { text: "静音时节省 Token"; checked <=> root.token-saver; }
-            CheckBox { text: "播放翻译语音"; checked <=> root.playback-enabled; enabled: root.model-index != 3; }
+            CheckBox { enabled: !root.session-running; text: "静音时节省 Token"; checked <=> root.token-saver; }
+            CheckBox { text: "播放翻译语音"; checked <=> root.playback-enabled; enabled: !root.session-running && root.model-index != 3; }
         }
 
         Rectangle { height: 1px; background: #d7dfe2; }
@@ -151,8 +168,8 @@ export component ControlWindow inherits Window {
             spacing: 12px;
             Button { text: "退出"; clicked => { root.quit-requested(); } }
             Rectangle { horizontal-stretch: 1; }
-            Button { text: root.probe-running ? "取消网络测试" : "测试网络"; clicked => { root.probe-transport(); } }
-            Button { text: root.session-running ? "停止" : "验证并开始"; primary: true; clicked => { root.start-stop(); } }
+            Button { enabled: !root.session-running; text: root.probe-running ? "取消网络测试" : "测试网络"; clicked => { root.probe-transport(); } }
+            Button { enabled: !root.probe-running; text: root.session-running ? "停止" : "验证并开始"; primary: true; clicked => { root.start-stop(); } }
         }
         Text {
             text: "v1.1.0 migration build · Rust 1.100 · Slint 1.18.1";
