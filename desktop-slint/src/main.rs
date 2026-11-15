@@ -6,6 +6,7 @@ slint::include_modules!();
 
 mod config_store;
 mod device_provider;
+mod native_transport;
 
 use anyhow::anyhow;
 use config_store::ConfigStore;
@@ -268,6 +269,41 @@ fn main() -> Result<(), slint::PlatformError> {
             Ok(()) => ui.set_status_message("原生会话已启动".into()),
             Err(error) => ui.set_status_message(error.to_string().into()),
         }
+    });
+
+    let weak = control.as_weak();
+    let callback_devices = Rc::clone(&devices);
+    control.on_probe_transport(move || {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        if ui.get_probe_running() {
+            return;
+        }
+        let options = options_from_ui(&ui, &callback_devices.borrow());
+        if let Err(error) = callback_devices.borrow().validate_selection(&options) {
+            ui.set_status_message(error.to_string().into());
+            return;
+        }
+        ui.set_probe_running(true);
+        ui.set_status_message("正在验证代理、TLS、WebSocket 和 setup；不会打开或上传音频".into());
+        let thread_weak = weak.clone();
+        std::thread::spawn(move || {
+            let result = native_transport::probe_blocking(options);
+            let _ = thread_weak.upgrade_in_event_loop(move |ui| {
+                ui.set_probe_running(false);
+                match result {
+                    Ok(report) => ui.set_status_message(
+                        format!(
+                            "网络验证成功：{}，{} ms；未打开或上传音频",
+                            report.route_label, report.elapsed_ms
+                        )
+                        .into(),
+                    ),
+                    Err(error) => ui.set_status_message(error.to_string().into()),
+                }
+            });
+        });
     });
 
     let weak = control.as_weak();

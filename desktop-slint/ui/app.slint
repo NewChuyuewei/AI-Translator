@@ -55,9 +55,11 @@ export component ControlWindow inherits Window {
     in-out property <bool> overlay-locked: true;
     in-out property <float> overlay-scale: 1.0;
     in-out property <bool> session-running: false;
+    in-out property <bool> probe-running: false;
     in-out property <string> status-message: "Slint 桌面迁移预览 · 尚未连接会话后端";
 
     callback start-stop();
+    callback probe-transport();
     callback save-settings();
     callback unlock-vault();
     callback remove-vault();
@@ -149,6 +151,7 @@ export component ControlWindow inherits Window {
             spacing: 12px;
             Button { text: "退出"; clicked => { root.quit-requested(); } }
             Rectangle { horizontal-stretch: 1; }
+            Button { enabled: !root.probe-running; text: root.probe-running ? "连接验证中…" : "测试网络"; clicked => { root.probe-transport(); } }
             Button { text: root.session-running ? "停止" : "验证并开始"; primary: true; clicked => { root.start-stop(); } }
         }
         Text {
