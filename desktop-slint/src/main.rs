@@ -13,6 +13,7 @@ mod native_session;
 mod native_transport;
 
 use anyhow::anyhow;
+use caption_platform::MousePassthrough;
 use config_store::ConfigStore;
 use device_provider::NativeDeviceProvider;
 use native_diagnostics::NativeDiagnostics;
@@ -245,6 +246,28 @@ fn apply_devices(ui: &ControlWindow, devices: &AudioDevices) {
     ));
 }
 
+/// Apply lock transitions transactionally. Enabling pass-through may fail
+/// closed (the caption remains interactive but immovable). Disabling must
+/// succeed before the only recovery control reports an unlocked state.
+fn apply_caption_lock(
+    caption: &CaptionWindow,
+    input: &mut MousePassthrough,
+    locked: bool,
+) -> Result<(), SharedString> {
+    if locked {
+        caption.set_locked(true);
+        input
+            .set(&caption.window().window_handle(), true)
+            .map_err(|error| SharedString::from(error.to_string()))
+    } else {
+        input
+            .set(&caption.window().window_handle(), false)
+            .map_err(|error| SharedString::from(error.to_string()))?;
+        caption.set_locked(false);
+        Ok(())
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let control = ControlWindow::new()?;
     let caption = CaptionWindow::new()?;
@@ -271,6 +294,7 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let session = Rc::new(RefCell::new(NativeSessionPort::default()));
+    let caption_input = Rc::new(RefCell::new(MousePassthrough::default()));
     let diagnostics = Rc::new(RefCell::new(NativeDiagnostics::default()));
     diagnostics
         .borrow()
@@ -503,21 +527,50 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    caption.set_locked(control.get_overlay_locked());
+    let initial_control = control.as_weak();
+    let initial_caption = caption.as_weak();
+    let initial_input = Rc::clone(&caption_input);
+    Timer::single_shot(Duration::from_millis(1), move || {
+        let (Some(ui), Some(window)) = (initial_control.upgrade(), initial_caption.upgrade())
+        else {
+            return;
+        };
+        let locked = ui.get_overlay_locked();
+        if let Err(error) = apply_caption_lock(&window, &mut initial_input.borrow_mut(), locked) {
+            ui.set_status_message(format!("字幕窗保持可交互的安全状态：{error}").into());
+        }
+    });
+
     let weak = control.as_weak();
     let caption_weak = caption.as_weak();
+    let callback_input = Rc::clone(&caption_input);
     control.on_toggle_overlay_lock(move || {
         let (Some(ui), Some(window)) = (weak.upgrade(), caption_weak.upgrade()) else {
             return;
         };
-        let locked = !ui.get_overlay_locked();
-        ui.set_overlay_locked(locked);
-        window.set_locked(locked);
-        ui.set_status_message(if locked {
-            "字幕窗已锁定；拖动已禁用。鼠标穿透在平台适配验收前保持关闭。".into()
-        } else {
-            "字幕窗已解锁，可拖动移动。".into()
-        });
+        let requested_lock = !ui.get_overlay_locked();
+        match apply_caption_lock(&window, &mut callback_input.borrow_mut(), requested_lock) {
+            Ok(()) => {
+                ui.set_overlay_locked(requested_lock);
+                ui.set_status_message(if requested_lock {
+                    "字幕窗已锁定并启用鼠标穿透。使用控制窗解锁。".into()
+                } else {
+                    "字幕窗已解锁；鼠标穿透已关闭，可拖动移动。".into()
+                });
+            }
+            Err(error) if requested_lock => {
+                // Fail closed: lock movement but never claim pass-through.
+                ui.set_overlay_locked(true);
+                ui.set_status_message(format!("字幕窗已锁定但保持可交互：{error}").into());
+            }
+            Err(error) => {
+                // A failed disable must not create a false unlocked state.
+                ui.set_overlay_locked(true);
+                ui.set_status_message(
+                    format!("鼠标穿透关闭失败，字幕窗仍保持锁定：{error}").into(),
+                );
+            }
+        }
     });
 
     let caption_weak = caption.as_weak();

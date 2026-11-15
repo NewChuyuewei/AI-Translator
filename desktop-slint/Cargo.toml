@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+caption-platform = { path = "../crates/caption-platform" }
 cpal.workspace = true
 futures-util.workspace = true
 proxyres.workspace = true

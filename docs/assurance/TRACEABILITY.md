@@ -32,7 +32,7 @@
 | SWR-NDIAG-001 | Slint `NativeDiagnostics::begin_boundary`/`record`、`diagnostic-model` | `swr_ndiag_001_boundary_redacts_ui_lines_and_copy_text`、UI 绑定代码评审 |
 | SWR-NDIAG-002 | `NativeDiagnostics::copy_text` 64 Ki 字符上限、核心 `clear` 水位线 | `swr_ndiag_002_copy_is_bounded_and_clear_uses_core_watermark` |
 | SWR-NCAP-001 | `CaptionWindow` 的 `always-on-top`、`no-frame`、透明背景与受 `locked` 控制的 `WindowMoveArea` | Slint 编译、属性绑定代码评审；真机待办 `ASSURANCE-TARGET-006` |
-| SWR-NCAP-002 | 鼠标穿透保持关闭直至平台适配器成功并完成验收 | 故障注入待办、真机待办 `ASSURANCE-TARGET-006` |
+| SWR-NCAP-002 | 独立 `caption-platform::MousePassthrough` 状态提交、Windows `WS_EX_TRANSPARENT`、macOS `setIgnoresMouseEvents:` 及 Slint 事务式锁定适配 | `swr_ncap_002_failed_enable_remains_interactive`、`swr_ncap_002_failed_disable_never_reports_recovery`、`swr_ncap_002_success_commits_each_transition`；真机待办 `ASSURANCE-TARGET-006` |
 | SWR-SET-001 | `settings_for_storage`、`encode_settings` | `swr_set_001_encode_never_contains_sensitive_values`、旧 Tauri 设置测试 |
 | SWR-SET-002 | `PersistedSettings`、`decode_settings` | `swr_set_002_current_format_round_trips_with_compatible_fields`、前端 mock 测试 |
 | SWR-SET-003 | `DecodedSettings::migration_required`、Tauri 原子写适配器 | `swr_set_003_legacy_migration_is_explicit_and_erases_secrets`、代码评审 |
