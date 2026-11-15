@@ -57,11 +57,17 @@
 | SWR-ROUTE-001 | `ProxyRoute::immediate`、`ProxyDestination` | `swr_route_001_direct_and_manual_modes_resolve_without_platform_access` |
 | SWR-ROUTE-002 | `ProxyRoute::automatic_resolver_value`、Tauri 首选值策略 | `swr_route_002_auto_requires_one_platform_selected_value`、旧无直连回退隧道测试 |
 | SWR-ROUTE-003 | 自动值安全上下文映射 | `swr_route_003_invalid_auto_value_has_fixed_context_without_secrets` |
+| SWR-NTRANS-001 | Slint `native_transport::probe_endpoint`、`SessionDriver` | `swr_ntrans_001_probe_sends_header_setup_and_end_but_no_pcm` |
+| SWR-NTRANS-002 | `WebSocketConfig` 上限及分阶段 timeout | workspace 编译、代码评审；故障注入待办 `ASSURANCE-NET-001` |
+| SWR-NTRANS-003 | `resolve_route`、`open_route`、核心握手函数 | 核心 SWR-ROUTE/TUN 测试、旧异步隧道测试 |
+| SWR-NTRANS-004 | Slint `probe-transport` 后台线程、`probe-running` 门和安全错误映射 | 代码评审；UI 驱动待办 `ASSURANCE-UI-003` |
 
 ## 开放验证项
 
 - `ASSURANCE-UI-001`：加入可注入内存适配器后验证 Slint 未接入/失败状态不会启动采集；
 - `ASSURANCE-UI-002`：使用 Slint 交互驱动验证密码属性即时清空、保险库失败状态及保存/解锁/删除按钮状态；
+- `ASSURANCE-UI-003`：验证网络探测重复点击门、后台完成回调及窗口关闭后的安全丢弃；
+- `ASSURANCE-NET-001`：对 DNS、TCP、代理、TLS、WebSocket、setup 发送和 setupComplete 等待逐阶段注入超时/取消故障；
 - `ASSURANCE-COV-001`：选定并鉴定或人工核查覆盖率工具，建立需求覆盖和结构覆盖报告；
 - `ASSURANCE-INDEP-001`：在具备第二位合格评审者时记录验证独立性；
 - `ASSURANCE-TARGET-001`：Windows/macOS 真机结果必须链接到对应需求，不能用 Linux CI 替代。

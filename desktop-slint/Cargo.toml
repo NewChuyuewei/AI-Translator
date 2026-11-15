@@ -16,7 +16,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 cpal.workspace = true
+futures-util.workspace = true
+proxyres.workspace = true
+rustls.workspace = true
 slint.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
 translator-core = { path = "../crates/translator-core" }
 zeroize.workspace = true
 
