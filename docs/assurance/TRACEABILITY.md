@@ -62,7 +62,8 @@
 | SWR-NTRANS-003 | `resolve_route`、`open_route`、核心握手函数 | 核心 SWR-ROUTE/TUN 测试、旧异步隧道测试 |
 | SWR-NTRANS-004 | Slint `probe-transport` 后台线程、`probe-running` 门和安全错误映射 | 代码评审；UI 驱动待办 `ASSURANCE-UI-003` |
 | SWR-NTRANS-005 | `ProbeCancel`、分阶段 `tokio::select!`、可取消平台代理等待 | `swr_ntrans_005_setup_wait_is_cancellable`、退出回调代码评审 |
-| SWR-NTRANS-006 | `session_blocking`、共享 `establish_session`/`receive_message`/`close_session` | `swr_ntrans_006_session_forwards_messages_and_stops_once` |
+| SWR-NTRANS-006 | `session_blocking`、共享 `establish_session`/`receive_message`/`close_session` | `swr_ntrans_006_and_007_session_sends_audio_then_forwards_and_stops`、无 PCM 探测测试 |
+| SWR-NTRANS-007 | `session_with_audio_blocking`、有界 Tokio 接收器、biased cancel、`SessionDriver::encode_audio` | `swr_ntrans_006_and_007_session_sends_audio_then_forwards_and_stops` |
 | SWR-NPORT-001 | Slint `NativeSessionPort` 的 `audio_path_verified` 关闭门 | `swr_nport_001_production_start_is_fail_closed_before_audio_verification` |
 | SWR-NPORT-002 | `TransportTask`、`BoundedEventQueue<WorkerEvent, 32>`、原子取消与延迟 join | `swr_nport_002_worker_mailbox_is_bounded_and_freshness_first`、生命周期代码评审 |
 | SWR-NPORT-003 | `NativeSessionPort::handle_worker_event`、Slint 25 ms/最多 32 项定时排空 | `swr_nport_003_worker_events_map_to_typed_ui_lifecycle`、UI 适配代码评审 |

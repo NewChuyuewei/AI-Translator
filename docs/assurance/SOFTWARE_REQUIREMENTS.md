@@ -64,7 +64,8 @@
 | SWR-NTRANS-003 | 原生验证必须消费统一 `ProxyRoute`，支持直连、HTTP CONNECT、SOCKS5 和单一系统解析值；代理失败不得静默直连。 | 核心隧道测试、适配器分支评审 |
 | SWR-NTRANS-004 | 网络验证必须在 UI 线程外运行，重复请求必须被拒绝；只有完整 setup 往返成功才能显示成功，错误不得包含服务端正文、API Key 或代理凭据。 | Slint 回调代码评审、错误映射评审 |
 | SWR-NTRANS-005 | 用户再次点击或退出窗口必须可取消代理等待、连接握手、setup 发送和 setupComplete 等待；取消必须返回固定错误且不得显示成功状态。 | 真实 WebSocket 取消测试、UI 回调评审 |
-| SWR-NTRANS-006 | 原生长期传输任务必须在 setupComplete 后转发经核心解析的类型化服务端消息；停止时必须发送唯一 stream end、关闭 WebSocket，且该边界不得打开音频设备或发送 PCM。 | 真实 WebSocket 长期任务与确定性停止测试 |
+| SWR-NTRANS-006 | 原生长期传输任务必须在 setupComplete 后转发经核心解析的类型化服务端消息；停止时必须发送唯一 stream end 并关闭 WebSocket。默认探测及无音频入口不得创建 PCM 生产者。 | 真实 WebSocket 长期任务与确定性停止测试 |
+| SWR-NTRANS-007 | 原生长期传输必须只从有界 PCM 接收器读取音频，并且只能在 setupComplete 后通过核心 `SessionDriver::encode_audio` 编码发送；取消必须优先于队列中尚未发送的 PCM。 | 真实 WebSocket setup/PCM/消息/stream-end 顺序测试 |
 | SWR-NPORT-001 | Slint 原生 `SessionPort` 在音频路径通过验证前必须保持关闭，不得创建传输任务、打开设备或改变空闲状态。 | 原生端口安全门单元测试 |
 | SWR-NPORT-002 | 原生传输工作线程与 UI 之间必须使用固定容量、溢出时保留新鲜事件的类型化邮箱；停止请求不得等待网络线程，任务结束后必须可回收线程句柄。 | 邮箱容量测试、生命周期代码评审 |
 | SWR-NPORT-003 | 原生端口必须把 setup、转写和停止结果映射为核心定义的状态与有界字幕事件；Slint UI 只能通过定时排空该邮箱更新状态和字幕，单次排空必须有上限。 | 原生端口事件映射测试、Slint 定时器代码评审 |

@@ -7,13 +7,14 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc as std_mpsc,
     },
     time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    sync::mpsc,
 };
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, client_async_tls_with_config,
@@ -56,6 +57,16 @@ pub enum SessionTransportEvent {
 pub fn session_blocking(
     options: SessionOptions,
     cancel: ProbeCancel,
+    publish: impl FnMut(SessionTransportEvent),
+) -> Result<&'static str> {
+    let (_audio_sender, audio_receiver) = mpsc::channel(1);
+    session_with_audio_blocking(options, cancel, audio_receiver, publish)
+}
+
+pub fn session_with_audio_blocking(
+    options: SessionOptions,
+    cancel: ProbeCancel,
+    audio_receiver: mpsc::Receiver<Vec<u8>>,
     mut publish: impl FnMut(SessionTransportEvent),
 ) -> Result<&'static str> {
     options.validate()?;
@@ -70,6 +81,7 @@ pub fn session_blocking(
         route,
         ENDPOINT,
         cancel,
+        audio_receiver,
         &mut publish,
     ))?;
     Ok(route_label)
@@ -96,7 +108,7 @@ fn resolve_route(mode: ProxyMode, address: &str, cancel: &ProbeCancel) -> Result
     if let Some(route) = ProxyRoute::immediate(mode, address)? {
         return Ok(route);
     }
-    let (sender, receiver) = mpsc::sync_channel(1);
+    let (sender, receiver) = std_mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let _ = sender.send(resolve_automatic_route());
     });
@@ -106,8 +118,8 @@ fn resolve_route(mode: ProxyMode, address: &str, cancel: &ProbeCancel) -> Result
         }
         match receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(result) => return result,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
                 return Err(anyhow!("系统代理检测任务失败"));
             }
         }
@@ -270,12 +282,44 @@ async fn session_endpoint(
     route: ProxyRoute,
     endpoint: &str,
     cancel: ProbeCancel,
+    mut audio_receiver: mpsc::Receiver<Vec<u8>>,
     publish: &mut dyn FnMut(SessionTransportEvent),
 ) -> Result<()> {
     let (mut socket, mut driver) = establish_session(&options, &route, endpoint, &cancel).await?;
     publish(SessionTransportEvent::SetupComplete);
+    let mut audio_open = true;
     loop {
         tokio::select! {
+            biased;
+            () = cancelled(&cancel) => break,
+            pcm = async {
+                if audio_open {
+                    audio_receiver.recv().await
+                } else {
+                    std::future::pending().await
+                }
+            } => {
+                if let Some(pcm) = pcm {
+                    let frame = driver.encode_audio(&pcm)?;
+                    tokio::select! {
+                        biased;
+                        () = cancelled(&cancel) => break,
+                        result = tokio::time::timeout(
+                            Duration::from_secs(10),
+                            socket.send(Message::Text(frame.into())),
+                        ) => {
+                            result
+                                .map_err(|_| anyhow!("发送音频帧超时"))?
+                                .map_err(|error| anyhow!(
+                                    "发送音频帧失败：{}",
+                                    describe_ws_error(&error)
+                                ))?;
+                        }
+                    }
+                } else {
+                    audio_open = false;
+                }
+            }
             message = socket.next() => {
                 let message = message
                     .ok_or_else(|| anyhow!("Gemini 已关闭连接"))?
@@ -290,7 +334,6 @@ async fn session_endpoint(
                     Some(DriverEvent::Metadata(_)) | None => {}
                 }
             }
-            () = cancelled(&cancel) => break,
         }
     }
     close_session(&mut socket, &mut driver).await
@@ -523,7 +566,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn swr_ntrans_006_session_forwards_messages_and_stops_once() {
+    async fn swr_ntrans_006_and_007_session_sends_audio_then_forwards_and_stops() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind fixture");
@@ -539,6 +582,12 @@ mod tests {
                 .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
                 .await
                 .expect("setup complete");
+            let audio = socket.next().await.expect("audio frame").expect("audio");
+            let Message::Text(audio) = audio else {
+                panic!("expected audio text")
+            };
+            let audio: serde_json::Value = serde_json::from_str(&audio).expect("audio frame JSON");
+            assert_eq!(audio["realtimeInput"]["audio"]["data"], "AQIDBA==");
             socket
                 .send(Message::Text(
                     r#"{"serverContent":{"inputTranscription":{"text":"hello"},"outputTranscription":{"text":"你好"}}}"#.into(),
@@ -557,15 +606,24 @@ mod tests {
         });
         let cancel = Arc::new(AtomicBool::new(false));
         let callback_cancel = Arc::clone(&cancel);
+        let (audio_sender, audio_receiver) = mpsc::channel(1);
         let mut events = Vec::new();
         session_endpoint(
             options(),
             ProxyRoute::explicit_direct(),
             &format!("ws://{address}"),
             cancel,
+            audio_receiver,
             &mut |event| {
-                if matches!(event, SessionTransportEvent::Message(_)) {
-                    callback_cancel.store(true, Ordering::Release);
+                match event {
+                    SessionTransportEvent::SetupComplete => {
+                        audio_sender
+                            .try_send(vec![1, 2, 3, 4])
+                            .expect("queue audio");
+                    }
+                    SessionTransportEvent::Message(_) => {
+                        callback_cancel.store(true, Ordering::Release);
+                    }
                 }
                 events.push(event);
             },
