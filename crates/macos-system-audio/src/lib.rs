@@ -17,6 +17,7 @@ pub enum CaptureEvent {
 
 /// Interleave equally formatted Float32 planes without reading beyond the
 /// shortest plane. Bounds are checked before allocation.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn interleave_planar(
     planes: &[&[f32]],
     max_channels: usize,
