@@ -54,6 +54,12 @@ jobs:
             echo "::error title=Rust workspace tests failed::${details}"
             exit 1
           fi
+      - name: Upload generated workspace lockfile
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-workspace-lock
+          path: Cargo.lock
+          retention-days: 1
       - name: Run legacy Tauri adapter tests
         run: |
           if cargo test --manifest-path src-tauri/Cargo.toml --lib --locked >rust-test.log 2>&1; then
