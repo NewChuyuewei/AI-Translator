@@ -4,7 +4,8 @@
 
 ## 1. 当前目标与不可变更的产品约定
 
-- 桌面端使用 Tauri 2 + Rust；Android 已改为独立的 Kotlin + JDK 25 + Jetpack Compose 工程，不复用 WebView、Rust 或 JNI。Linux 用于开发测试。
+- 桌面端当前仍使用 Tauri 2 + Rust；Android 已改为独立的 Kotlin + JDK 25 + Jetpack Compose 工程，不复用 WebView、Rust 或 JNI。Linux 用于开发测试。
+- 用户已批准桌面端按 `docs/PC_RUST_SLINT_ROADMAP.md` 分阶段迁移：v2.1.0 Rust + Slint，v2.2.0 无分配回调/SPSC，v2.3.0 平台原生音频，v2.4.0 混音时钟，v2.5.0 VAD，v2.6.0 内部帧，最终 v3.0.0 生产化；当前仅制定计划，尚未开始迁移或推进版本。
 - 保留现有 `Gemini 3.8 Live` 指令式翻译、`Gemini 3.8 Live Extended Thinking`（LOW/MEDIUM/HIGH）及原有系统代理、音源、字幕窗、Android 服务和连接诊断。
 - 增加 `gemini-3.5-live-translate-preview`：每个会话固定**一个目标语言**，原文及译文字幕，可选择播放译音；不是双向翻译。当前 `echoTargetLanguage=false`：输入已是目标语言时不会复述。
 - 增加 `gemini-3.5-transcribe-live`：用户明确选择**只实时转写原文，不做翻译，也不播放译音**；不得私自串接收费的二次翻译服务。目标语言、双向和译音控制在该模式不可用。默认 VERBATIM；可选 SMART，它只整理原文，可能删除口头语或修改格式。
