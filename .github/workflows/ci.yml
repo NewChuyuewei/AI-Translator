@@ -54,9 +54,9 @@ jobs:
           exit 1
       - name: Verify native Rust static analysis
         run: |
-          if cargo clippy --workspace --all-targets --all-features --locked -- -D warnings >clippy.log 2>&1; then exit 0; fi
+          if cargo clippy --workspace --all-targets --all-features --locked --message-format=short -- -D warnings >clippy.log 2>&1; then exit 0; fi
           cat clippy.log
-          details="$(grep -E -i -B 3 -A 12 'error\[|error:|warning:|failed' clippy.log | tail -c 12000)"
+          details="$(tail -c 12000 clippy.log | sed -r 's/\x1B\[[0-9;]*[mK]//g')"
           details="${details//'%'/'%25'}"
           details="${details//$'\r'/'%0D'}"
           details="${details//$'\n'/'%0A'}"
