@@ -682,6 +682,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
                 // shortest practical lifetime in process memory.
                 let message = gemini_client::audio_frame(&frame);
                 frame.zeroize();
+                let message = message.context("无法编码有界音频帧")?;
                 let sent = tokio::select! {
                     _ = gemini_client::cancelled(cancel) => break Ok(()),
                     result = tokio::time::timeout(std::time::Duration::from_secs(8), sink.send(message)) => result,
