@@ -1,0 +1,12 @@
+[package]
+name = "caption-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file = "../../COPYRIGHT"
+repository.workspace = true
+description = "Narrow native caption-window safety adapter"
+
+[dependencies]
+raw-window-handle = "0.6.2"
