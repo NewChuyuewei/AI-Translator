@@ -69,10 +69,10 @@ impl TransportTask {
 
     fn poll(&mut self) -> Option<WorkerEvent> {
         let event = lock_events(&self.events).pop();
-        if self.finished.load(Ordering::Acquire) {
-            if let Some(join) = self.join.take() {
-                let _ = join.join();
-            }
+        if self.finished.load(Ordering::Acquire)
+            && let Some(join) = self.join.take()
+        {
+            let _ = join.join();
         }
         event
     }
@@ -102,22 +102,12 @@ fn push_worker_event(
 /// Production construction intentionally leaves `audio_path_verified` false.
 /// This installs the final lifecycle shape without allowing a network-only
 /// session to be presented as an operational audio session.
+#[derive(Default)]
 pub struct NativeSessionPort {
     status: SessionStatus,
     events: BoundedEventQueue<UiEvent, UI_EVENT_CAPACITY>,
     task: Option<TransportTask>,
     audio_path_verified: bool,
-}
-
-impl Default for NativeSessionPort {
-    fn default() -> Self {
-        Self {
-            status: SessionStatus::default(),
-            events: BoundedEventQueue::default(),
-            task: None,
-            audio_path_verified: false,
-        }
-    }
 }
 
 impl NativeSessionPort {
@@ -294,9 +284,11 @@ mod tests {
         port.status.phase = SessionPhase::Connecting;
         port.handle_worker_event(WorkerEvent::Transport(SessionTransportEvent::SetupComplete));
         assert_eq!(port.phase(), SessionPhase::Running);
-        let mut message = ParsedMessage::default();
-        message.input = Some(("hello".into(), true));
-        message.output = Some(("你好".into(), true));
+        let message = ParsedMessage {
+            input: Some(("hello".into(), true)),
+            output: Some(("你好".into(), true)),
+            ..ParsedMessage::default()
+        };
         port.handle_worker_event(WorkerEvent::Transport(SessionTransportEvent::Message(
             message,
         )));
