@@ -4,6 +4,7 @@
 
 use crate::{
     native_audio::{AudioTaskEvent, NativeAudioTask},
+    native_playback::{NativePlaybackTask, PlaybackTaskEvent},
     native_transport::{self, ProbeCancel, SessionTransportEvent},
 };
 use anyhow::{Result, anyhow};
@@ -121,7 +122,12 @@ pub struct NativeSessionPort {
     events: BoundedEventQueue<UiEvent, UI_EVENT_CAPACITY>,
     task: Option<TransportTask>,
     audio: Option<NativeAudioTask>,
+    playback: Option<NativePlaybackTask>,
     microphone_device: Option<String>,
+    playback_device: Option<String>,
+    playback_required: bool,
+    microphone_ready: bool,
+    playback_ready: bool,
 }
 
 impl NativeSessionPort {
@@ -138,6 +144,9 @@ impl NativeSessionPort {
                     self.microphone_device.clone(),
                     task.audio_sender(),
                 ));
+                if self.playback_required {
+                    self.playback = Some(NativePlaybackTask::spawn(self.playback_device.clone()));
+                }
             }
             WorkerEvent::Transport(SessionTransportEvent::Message(message)) => {
                 self.publish_message(message);
@@ -163,14 +172,8 @@ impl NativeSessionPort {
     fn handle_audio_event(&mut self, event: AudioTaskEvent) {
         match event {
             AudioTaskEvent::Ready => {
-                match self.status.phase.transition(SessionEvent::SetupCompleted) {
-                    Ok(phase) => {
-                        self.status.phase = phase;
-                        self.status.message = "原生麦克风会话正在运行".into();
-                        self.events.push(UiEvent::Status(self.status.clone()));
-                    }
-                    Err(error) => self.fail(&error.to_string()),
-                }
+                self.microphone_ready = true;
+                self.try_mark_running();
             }
             AudioTaskEvent::Failed(message) => {
                 if let Some(task) = &self.task {
@@ -191,7 +194,60 @@ impl NativeSessionPort {
         }
     }
 
-    fn publish_message(&mut self, message: ParsedMessage) {
+    fn handle_playback_event(&mut self, event: PlaybackTaskEvent) {
+        match event {
+            PlaybackTaskEvent::Ready => {
+                self.playback_ready = true;
+                self.try_mark_running();
+            }
+            PlaybackTaskEvent::Failed(message) => {
+                if let Some(task) = &self.task {
+                    task.request_stop();
+                }
+                if let Some(audio) = &self.audio {
+                    audio.request_stop();
+                }
+                self.fail(message.as_str());
+            }
+            PlaybackTaskEvent::Stopped => {
+                if self.status.phase != SessionPhase::Stopping
+                    && self.status.phase != SessionPhase::Error
+                {
+                    if let Some(task) = &self.task {
+                        task.request_stop();
+                    }
+                    if let Some(audio) = &self.audio {
+                        audio.request_stop();
+                    }
+                    self.fail("译音播放意外停止");
+                }
+            }
+        }
+    }
+
+    fn try_mark_running(&mut self) {
+        if !self.microphone_ready || (self.playback_required && !self.playback_ready) {
+            return;
+        }
+        match self.status.phase.transition(SessionEvent::SetupCompleted) {
+            Ok(phase) => {
+                self.status.phase = phase;
+                self.status.message = "原生麦克风会话正在运行".into();
+                self.events.push(UiEvent::Status(self.status.clone()));
+            }
+            Err(error) => self.fail(&error.to_string()),
+        }
+    }
+
+    fn publish_message(&mut self, mut message: ParsedMessage) {
+        if let Some(playback) = &self.playback {
+            if message.interrupted {
+                playback.clear();
+            }
+            for audio in message.audio.drain(..) {
+                playback.push(audio);
+            }
+        }
         let original = message
             .input
             .or(message.interim_input)
@@ -228,15 +284,16 @@ impl SessionPort for NativeSessionPort {
                 "Slint 原生系统音频与混合采集尚未完成验证；未连接或上传音频"
             ));
         }
-        if options.play_translation() {
-            return Err(anyhow!("Slint 原生译音播放尚未完成验证；请先关闭译音播放"));
-        }
         let phase = self.status.phase.transition(SessionEvent::StartRequested)?;
         self.status.phase = phase;
         self.status.message = "正在连接原生传输".into();
         self.status.transcription_only = options.model.is_transcription_only();
         self.events.push(UiEvent::Status(self.status.clone()));
         self.microphone_device = options.microphone_device.clone();
+        self.playback_device = options.playback_device.clone();
+        self.playback_required = options.play_translation();
+        self.microphone_ready = false;
+        self.playback_ready = !self.playback_required;
         self.task = Some(TransportTask::spawn(options.clone()));
         Ok(())
     }
@@ -250,6 +307,9 @@ impl SessionPort for NativeSessionPort {
         self.status.phase = phase;
         self.status.message = "正在停止".into();
         self.events.push(UiEvent::Status(self.status.clone()));
+        if let Some(playback) = &self.playback {
+            playback.request_stop();
+        }
         if let Some(audio) = &self.audio {
             audio.request_stop();
         }
@@ -265,6 +325,18 @@ impl SessionPort for NativeSessionPort {
         if let Some(event) = self.events.pop() {
             return Some(event);
         }
+        let playback_event = self.playback.as_mut().and_then(NativePlaybackTask::poll);
+        if let Some(event) = playback_event {
+            let terminal = matches!(
+                event,
+                PlaybackTaskEvent::Stopped | PlaybackTaskEvent::Failed(_)
+            );
+            self.handle_playback_event(event);
+            if terminal {
+                self.playback = None;
+            }
+            return self.events.pop();
+        }
         let audio_event = self.audio.as_mut().and_then(NativeAudioTask::poll);
         if let Some(event) = audio_event {
             let terminal = matches!(event, AudioTaskEvent::Stopped | AudioTaskEvent::Failed(_));
@@ -277,8 +349,13 @@ impl SessionPort for NativeSessionPort {
         let worker_event = self.task.as_mut().and_then(TransportTask::poll);
         if let Some(event) = worker_event {
             let terminal = matches!(event, WorkerEvent::Completed | WorkerEvent::Failed(_));
-            if terminal && let Some(audio) = &self.audio {
-                audio.request_stop();
+            if terminal {
+                if let Some(playback) = &self.playback {
+                    playback.request_stop();
+                }
+                if let Some(audio) = &self.audio {
+                    audio.request_stop();
+                }
             }
             self.handle_worker_event(event);
             if terminal {
@@ -350,7 +427,10 @@ mod tests {
     fn swr_nport_003_worker_events_map_to_typed_ui_lifecycle() {
         let mut port = NativeSessionPort::default();
         port.status.phase = SessionPhase::Connecting;
+        port.playback_required = true;
         port.handle_audio_event(AudioTaskEvent::Ready);
+        assert_eq!(port.phase(), SessionPhase::Connecting);
+        port.handle_playback_event(PlaybackTaskEvent::Ready);
         assert_eq!(port.phase(), SessionPhase::Running);
         let message = ParsedMessage {
             input: Some(("hello".into(), true)),

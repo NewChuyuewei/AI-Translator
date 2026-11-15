@@ -7,6 +7,7 @@ slint::include_modules!();
 mod config_store;
 mod device_provider;
 mod native_audio;
+mod native_playback;
 mod native_session;
 mod native_transport;
 
