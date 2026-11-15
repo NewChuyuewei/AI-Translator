@@ -42,6 +42,12 @@ jobs:
       - run: npm run test:version
       - run: npm run test:android-config
       - run: npm run test:assurance
+      - name: TEMP generate native Rust lockfile
+        run: cargo generate-lockfile
+      - uses: actions/upload-artifact@v6
+        with:
+          name: generated-lockfile
+          path: Cargo.lock
       - name: Verify native Rust lockfile
         run: cargo metadata --locked --no-deps --format-version 1 >/dev/null
       - name: Verify native Rust formatting
