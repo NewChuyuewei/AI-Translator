@@ -65,7 +65,7 @@ impl MacSystemCapture {
                 &excluded,
             )
         };
-        let configuration = SCStreamConfiguration::new();
+        let configuration = unsafe { SCStreamConfiguration::new() };
         unsafe {
             configuration.setCapturesAudio(true);
             configuration.setExcludesCurrentProcessAudio(true);
