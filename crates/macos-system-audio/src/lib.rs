@@ -17,7 +17,11 @@ pub enum CaptureEvent {
 
 /// Interleave equally formatted Float32 planes without reading beyond the
 /// shortest plane. Bounds are checked before allocation.
-fn interleave_planar(planes: &[&[f32]], max_channels: usize, max_samples: usize) -> Option<Vec<f32>> {
+fn interleave_planar(
+    planes: &[&[f32]],
+    max_channels: usize,
+    max_samples: usize,
+) -> Option<Vec<f32>> {
     if planes.is_empty() || planes.len() > max_channels {
         return None;
     }
@@ -45,9 +49,7 @@ pub struct MacSystemCapture;
 
 #[cfg(not(target_os = "macos"))]
 impl MacSystemCapture {
-    pub fn start(
-        _notify: impl Fn(CaptureEvent) + Send + Sync + 'static,
-    ) -> anyhow::Result<Self> {
+    pub fn start(_notify: impl Fn(CaptureEvent) + Send + Sync + 'static) -> anyhow::Result<Self> {
         Err(anyhow::anyhow!("ScreenCaptureKit 仅支持 macOS"))
     }
 }

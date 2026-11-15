@@ -310,19 +310,17 @@ fn run_capture(
         Some(macos_system_audio::MacSystemCapture::start({
             let raw_sender = raw_sender.clone();
             let capture_failed = Arc::clone(&mac_capture_failed);
-            move |event| {
-                match event {
-                    macos_system_audio::CaptureEvent::Data(chunk) => {
-                        let _ = raw_sender.try_send(RawEvent::Data(RawChunk {
-                            source: CaptureSource::System,
-                            sample_rate: chunk.sample_rate,
-                            channels: chunk.channels,
-                            samples: chunk.samples,
-                        }));
-                    }
-                    macos_system_audio::CaptureEvent::Failed => {
-                        capture_failed.store(true, Ordering::Release);
-                    }
+            move |event| match event {
+                macos_system_audio::CaptureEvent::Data(chunk) => {
+                    let _ = raw_sender.try_send(RawEvent::Data(RawChunk {
+                        source: CaptureSource::System,
+                        sample_rate: chunk.sample_rate,
+                        channels: chunk.channels,
+                        samples: chunk.samples,
+                    }));
+                }
+                macos_system_audio::CaptureEvent::Failed => {
+                    capture_failed.store(true, Ordering::Release);
                 }
             }
         })?)

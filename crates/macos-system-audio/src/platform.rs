@@ -105,10 +105,7 @@ impl Drop for MacSystemCapture {
                 let _ = sender.send(());
             }
         });
-        unsafe {
-            self.stream
-                .stopCaptureWithCompletionHandler(Some(&handler))
-        };
+        unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&handler)) };
         let _ = receiver.recv_timeout(Duration::from_millis(800));
         let _ = &self.queue;
     }
@@ -265,7 +262,11 @@ fn extract_audio(sample_buffer: &CMSampleBuffer) -> Option<AudioChunk> {
             })
             .collect();
         (
-            interleave_planar(&planes, MAX_AUDIO_BUFFERS, MAX_AUDIO_BYTES / size_of::<f32>())?,
+            interleave_planar(
+                &planes,
+                MAX_AUDIO_BUFFERS,
+                MAX_AUDIO_BYTES / size_of::<f32>(),
+            )?,
             u16::try_from(count).ok()?,
         )
     };
