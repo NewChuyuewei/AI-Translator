@@ -35,7 +35,7 @@
 | SWR-NCAP-002 | 独立 `caption-platform::MousePassthrough` 状态提交、Windows `WS_EX_TRANSPARENT`、macOS `setIgnoresMouseEvents:` 及 Slint 事务式锁定适配 | `swr_ncap_002_failed_enable_remains_interactive`、`swr_ncap_002_failed_disable_never_reports_recovery`、`swr_ncap_002_success_commits_each_transition`；真机待办 `ASSURANCE-TARGET-006` |
 | SWR-NLIFE-001 | Slint `AppTray`、显式 `HideWindow` 关闭策略、共享退出闭包和显式事件循环 | Slint workspace 编译、生命周期代码评审；真机待办 `ASSURANCE-TARGET-007` |
 | SWR-NLIFE-002 | `desktop_lifecycle::InstanceGuard` 的 Windows 命名 mutex 与 Unix advisory lock | `swr_nlife_002_lock_is_exclusive_and_released_by_guard`、平台代码评审 |
-| SWR-NLIFE-003 | `desktop_lifecycle::GlobalHotkey` 的 Windows 消息线程、macOS Carbon 注册、容量 1 邮箱及 Slint 25 ms 排空 | `swr_nlife_003_hotkey_mailbox_is_bounded_and_coalescing`、平台代码评审；真机待办 `ASSURANCE-TARGET-007` |
+| SWR-NLIFE-003 | `desktop_lifecycle::GlobalHotkey` 的 Windows 消息线程、macOS Carbon 注册、容量 1 邮箱及 Slint 25 ms 排空 | `swr_nlife_003_hotkey_mailbox_is_bounded_and_coalescing`、Windows/macOS target cross-check、平台代码评审；真机待办 `ASSURANCE-TARGET-007` |
 | SWR-SET-001 | `settings_for_storage`、`encode_settings` | `swr_set_001_encode_never_contains_sensitive_values`、旧 Tauri 设置测试 |
 | SWR-SET-002 | `PersistedSettings`、`decode_settings` | `swr_set_002_current_format_round_trips_with_compatible_fields`、前端 mock 测试 |
 | SWR-SET-003 | `DecodedSettings::migration_required`、Tauri 原子写适配器 | `swr_set_003_legacy_migration_is_explicit_and_erases_secrets`、代码评审 |
