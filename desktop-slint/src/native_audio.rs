@@ -203,23 +203,33 @@ fn run_capture(
     let error_sender = raw_sender.clone();
     let stream = match supported.sample_format() {
         SampleFormat::F32 => {
-            build_stream(&device, &config, raw_sender, error_sender, |value| *value)?
+            build_stream::<f32>(&device, &config, raw_sender, error_sender, |value| *value)?
         }
-        SampleFormat::F64 => build_stream(&device, &config, raw_sender, error_sender, |value| {
-            *value as f32
-        })?,
-        SampleFormat::I16 => build_stream(&device, &config, raw_sender, error_sender, |value| {
-            *value as f32 / 32768.0
-        })?,
-        SampleFormat::U16 => build_stream(&device, &config, raw_sender, error_sender, |value| {
-            (*value as f32 - 32768.0) / 32768.0
-        })?,
-        SampleFormat::I32 => build_stream(&device, &config, raw_sender, error_sender, |value| {
-            *value as f32 / 2_147_483_648.0
-        })?,
-        SampleFormat::U32 => build_stream(&device, &config, raw_sender, error_sender, |value| {
-            (*value as f64 / 2_147_483_648.0 - 1.0) as f32
-        })?,
+        SampleFormat::F64 => {
+            build_stream::<f64>(&device, &config, raw_sender, error_sender, |value| {
+                *value as f32
+            })?
+        }
+        SampleFormat::I16 => {
+            build_stream::<i16>(&device, &config, raw_sender, error_sender, |value| {
+                *value as f32 / 32768.0
+            })?
+        }
+        SampleFormat::U16 => {
+            build_stream::<u16>(&device, &config, raw_sender, error_sender, |value| {
+                (*value as f32 - 32768.0) / 32768.0
+            })?
+        }
+        SampleFormat::I32 => {
+            build_stream::<i32>(&device, &config, raw_sender, error_sender, |value| {
+                *value as f32 / 2_147_483_648.0
+            })?
+        }
+        SampleFormat::U32 => {
+            build_stream::<u32>(&device, &config, raw_sender, error_sender, |value| {
+                (*value as f64 / 2_147_483_648.0 - 1.0) as f32
+            })?
+        }
         _ => return Err(anyhow!("麦克风采样格式不受支持")),
     };
     stream.play().context("无法启动麦克风采集")?;
