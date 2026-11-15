@@ -281,6 +281,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::result_large_err)]
     async fn swr_ntrans_001_probe_sends_header_setup_and_end_but_no_pcm() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
