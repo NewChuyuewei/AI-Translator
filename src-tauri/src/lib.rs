@@ -15,7 +15,7 @@ use diagnostics::{LogEntry, LogStore, Trace};
 use futures_util::{SinkExt, StreamExt};
 use gemini_client::{GeminiOptions, InteractionStatus, ModelKind, ServerFrame, ThinkingLevel, TranscriptionMode};
 use proxy::ProxyMode;
-use translator_core::{checked_overlay_scale, SessionOptions as StartOptions, SessionStatus as Status};
+use translator_core::{checked_overlay_scale, SessionEvent, SessionOptions as StartOptions, SessionPhase, SessionStatus as Status};
 use ring::{aead, pbkdf2, rand::{SecureRandom, SystemRandom}};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::{Read, Write}, num::NonZeroU32, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::Instant};
@@ -289,17 +289,21 @@ fn resize_overlay(app: &AppHandle, scale: f64) -> Result<()> {
     Ok(())
 }
 fn publish(app: &AppHandle, status: &Status) { let _ = app.emit("session-status", status.clone()); }
-fn set_phase(app: &AppHandle, generation: u64, phase: &str, message: &str) {
+fn set_running(app: &AppHandle, generation: u64, message: &str) {
     let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
     if inner.generation != generation { return; }
-    // Stop requested while a setup callback was in flight: don't flip back to running.
-    if inner.status.phase == "stopping" && phase == "running" { return; }
-    inner.status.phase = phase.into(); inner.status.message = message.into();
+    // SWR-CORE-001: setup may only enter Running from Connecting. Later
+    // interaction-status updates may change the message while already Running.
+    if inner.status.phase == SessionPhase::Connecting {
+        let Ok(next) = inner.status.phase.transition(SessionEvent::SetupCompleted) else { return; };
+        inner.status.phase = next;
+    } else if inner.status.phase != SessionPhase::Running { return; }
+    inner.status.message = message.into();
     let status = inner.status.clone(); drop(inner); publish(app, &status);
 }
 fn set_network_route(app: &AppHandle, generation: u64, route: &str) {
     let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    if inner.generation != generation || inner.status.phase != "connecting" { return; }
+    if inner.generation != generation || inner.status.phase != SessionPhase::Connecting { return; }
     inner.status.network_route = route.into();
     let status = inner.status.clone(); drop(inner); publish(app, &status);
 }
@@ -312,10 +316,12 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
     let controller = app.state::<Controller>();
     let (cancel_rx, generation, status) = {
         let mut inner = controller.0.lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(inner.status.phase.as_str(), "connecting"|"running"|"stopping") { return Err(anyhow!("语音会话已经启动或正在停止")); }
+        let Ok(next) = inner.status.phase.transition(SessionEvent::StartRequested) else {
+            return Err(anyhow!("语音会话已经启动或正在停止"));
+        };
         let (tx, rx) = watch::channel(false);
         inner.generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed); inner.cancel = Some(tx); inner.last = Some(options.clone());
-        inner.status.phase = "connecting".into(); inner.status.message = "正在连接 Gemini 并准备音频…".into();
+        inner.status.phase = next; inner.status.message = "正在连接 Gemini 并准备音频…".into();
         inner.status.network_route = "正在选择网络路径…".into();
         inner.status.transcription_only = options.model.is_transcription_only();
         (rx, inner.generation, inner.status.clone())
@@ -337,9 +343,12 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
         if inner.generation == generation {
             inner.cancel = None;
             if requested_stop || result.is_ok() {
-                inner.status.phase = "idle".into(); inner.status.message = "已停止".into();
+                match inner.status.phase.transition(SessionEvent::StopCompleted) {
+                    Ok(next) => { inner.status.phase = next; inner.status.message = "已停止".into(); }
+                    Err(_) => { inner.status.phase = SessionPhase::Error; inner.status.message = "会话停止状态异常".into(); }
+                }
             } else {
-                inner.status.phase = "error".into();
+                inner.status.phase = inner.status.phase.transition(SessionEvent::Failed).unwrap_or(SessionPhase::Error);
                 inner.status.message = result.as_ref().err()
                     .map(|error| trace.redact(&format!("{error:#}")))
                     .unwrap_or_else(|| "会话异常结束".into());
@@ -352,8 +361,9 @@ fn start_session(app: AppHandle, options: StartOptions) -> Result<()> {
 }
 fn stop_session(app: &AppHandle) {
     let state = app.state::<Controller>(); let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(cancel) = &inner.cancel {
-        let _ = cancel.send(true); inner.status.phase = "stopping".into(); inner.status.message = "正在停止并释放音频…".into();
+    if let Some(cancel) = inner.cancel.clone() {
+        let Ok(next) = inner.status.phase.transition(SessionEvent::StopRequested) else { return; };
+        let _ = cancel.send(true); inner.status.phase = next; inner.status.message = "正在停止并释放音频…".into();
         #[cfg(target_os="android")] let generation = inner.generation;
         let status = inner.status.clone(); drop(inner); publish(app, &status);
         #[cfg(target_os="android")]
@@ -395,7 +405,7 @@ fn get_saved_settings(app: AppHandle, state: tauri::State<'_, Controller>) -> Re
         let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
         inner.last = Some(settings.options.clone());
         let mode_changed = inner.cancel.is_none()
-            && matches!(inner.status.phase.as_str(), "idle" | "error")
+            && inner.status.phase.can_start()
             && inner.status.transcription_only != transcription_only;
         let scale_changed = (inner.status.overlay_scale - overlay_scale).abs() > f64::EPSILON;
         if mode_changed { inner.status.transcription_only = transcription_only; }
@@ -453,7 +463,7 @@ fn remember_settings(app: AppHandle, state: tauri::State<'_, Controller>, mut op
     }
     inner.last = Some(options);
     let changed = inner.cancel.is_none()
-        && matches!(inner.status.phase.as_str(), "idle" | "error")
+        && inner.status.phase.can_start()
         && inner.status.transcription_only != transcription_only;
     if changed { inner.status.transcription_only = transcription_only; }
     let status = if changed { Some(inner.status.clone()) } else { None };
@@ -637,7 +647,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
     while pcm_rx.try_recv().is_ok() {}
     trace.info("音频采集已准备，会话进入运行状态（不记录音频或字幕内容）");
     let transcription_only = options.model.is_transcription_only();
-    set_phase(app, generation, "running", if transcription_only { "正在采集并转写原文" } else { "正在采集并翻译" });
+    set_running(app, generation, if transcription_only { "正在采集并转写原文" } else { "正在采集并翻译" });
     let (mut sink, mut stream) = socket.split();
     let mut caption = Subtitle { original: String::new(), translated: String::new(), transcription_only };
     let mut reset_input = false; let mut reset_output = false;
@@ -717,7 +727,7 @@ async fn session(app: &AppHandle, generation: u64, options: StartOptions, cancel
                                 InteractionStatus::InProgress => "正在采集并翻译 · 模型推理中",
                                 InteractionStatus::Idle => "正在采集并翻译",
                             };
-                            set_phase(app, generation, "running", text);
+                            set_running(app, generation, text);
                             last_interaction_status = Some(state);
                         }
                     }

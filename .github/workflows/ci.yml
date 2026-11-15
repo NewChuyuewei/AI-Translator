@@ -41,6 +41,27 @@ jobs:
       - run: npm run test:ui
       - run: npm run test:version
       - run: npm run test:android-config
+      - run: npm run test:assurance
+      - name: Verify native Rust formatting
+        run: |
+          if cargo fmt --all --check >rustfmt.log 2>&1; then exit 0; fi
+          cat rustfmt.log
+          details="$(tail -c 12000 rustfmt.log)"
+          details="${details//'%'/'%25'}"
+          details="${details//$'\r'/'%0D'}"
+          details="${details//$'\n'/'%0A'}"
+          echo "::error title=Rust formatting failed::${details}"
+          exit 1
+      - name: Verify native Rust static analysis
+        run: |
+          if cargo clippy --workspace --all-targets --all-features --locked -- -D warnings >clippy.log 2>&1; then exit 0; fi
+          cat clippy.log
+          details="$(grep -E -i -B 3 -A 12 'error\[|error:|warning:|failed' clippy.log | tail -c 12000)"
+          details="${details//'%'/'%25'}"
+          details="${details//$'\r'/'%0D'}"
+          details="${details//$'\n'/'%0A'}"
+          echo "::error title=Rust Clippy failed::${details}"
+          exit 1
       - name: Test Rust workspace and compile Slint desktop
         run: |
           if cargo test --workspace --all-targets --locked >workspace-test.log 2>&1; then
