@@ -51,8 +51,8 @@ FunctionEnd
 Section "Install"
   SetShellVarContext current
   SetOutPath "$INSTDIR"
-  File "${__FILEDIR__}/payload/${APP_EXE}"
-  File /oname=COPYRIGHT.txt "${__FILEDIR__}/../COPYRIGHT"
+  File "payload/${APP_EXE}"
+  File /oname=COPYRIGHT.txt "../COPYRIGHT"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}"
