@@ -39,6 +39,7 @@ use translator_core::{
 const ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const PROXY_TARGET: &str = "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
+#[derive(Debug)]
 pub struct ProbeReport {
     pub route_label: &'static str,
     pub elapsed_ms: u128,
