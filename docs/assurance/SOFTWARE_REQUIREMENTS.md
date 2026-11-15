@@ -64,6 +64,7 @@
 | SWR-NTRANS-003 | 原生验证必须消费统一 `ProxyRoute`，支持直连、HTTP CONNECT、SOCKS5 和单一系统解析值；代理失败不得静默直连。 | 核心隧道测试、适配器分支评审 |
 | SWR-NTRANS-004 | 网络验证必须在 UI 线程外运行，重复请求必须被拒绝；只有完整 setup 往返成功才能显示成功，错误不得包含服务端正文、API Key 或代理凭据。 | Slint 回调代码评审、错误映射评审 |
 | SWR-NTRANS-005 | 用户再次点击或退出窗口必须可取消代理等待、连接握手、setup 发送和 setupComplete 等待；取消必须返回固定错误且不得显示成功状态。 | 真实 WebSocket 取消测试、UI 回调评审 |
+| SWR-NTRANS-006 | 原生长期传输任务必须在 setupComplete 后转发经核心解析的类型化服务端消息；停止时必须发送唯一 stream end、关闭 WebSocket，且该边界不得打开音频设备或发送 PCM。 | 真实 WebSocket 长期任务与确定性停止测试 |
 
 ## 需求约束
 
