@@ -36,10 +36,15 @@
 | SWR-VAULT-002 | `SystemRandom` salt/nonce、`Zeroize` 清理 | `swr_vault_002_random_nonce_prevents_repeat_ciphertext`、代码评审 |
 | SWR-VAULT-003 | `decrypt_secrets` 认证和安全错误映射 | `swr_vault_003_wrong_password_and_tampering_share_safe_error` |
 | SWR-VAULT-004 | `MAX_VAULT_BYTES`、格式和 KDF 边界检查 | `swr_vault_004_bounds_password_input_and_format_parameters` |
+| SWR-NCFG-001 | Slint `ConfigStore::discover`、`load_settings`、`vault_exists` | `swr_ncfg_001_store_round_trips_settings_and_vault_separately`、路径代码评审 |
+| SWR-NCFG-002 | Slint `write_private`、Windows `replace_windows` | `swr_ncfg_002_replacement_does_not_leave_plaintext_or_temp_files`、平台代码评审 |
+| SWR-NCFG-003 | `read_bounded`、Unix 权限分支 | `swr_ncfg_003_unix_files_are_private`、核心超限测试 |
+| SWR-NCFG-004 | Slint 保存/解锁/删除回调和 `Zeroize` | 安全失败代码评审；交互测试待办 `ASSURANCE-UI-002` |
 
 ## 开放验证项
 
 - `ASSURANCE-UI-001`：加入可注入内存适配器后验证 Slint 未接入/失败状态不会启动采集；
+- `ASSURANCE-UI-002`：使用 Slint 交互驱动验证密码属性即时清空、保险库失败状态及保存/解锁/删除按钮状态；
 - `ASSURANCE-COV-001`：选定并鉴定或人工核查覆盖率工具，建立需求覆盖和结构覆盖报告；
 - `ASSURANCE-INDEP-001`：在具备第二位合格评审者时记录验证独立性；
 - `ASSURANCE-TARGET-001`：Windows/macOS 真机结果必须链接到对应需求，不能用 Linux CI 替代。

@@ -28,10 +28,13 @@ export component CaptionWindow inherits Window {
 export component ControlWindow inherits Window {
     title: "Gemini Live Translator · Slint 迁移预览";
     width: 620px;
-    height: 820px;
+    height: 900px;
     background: #f5f7f8;
 
     in-out property <string> api-key: "";
+    in-out property <bool> save-sensitive: false;
+    in-out property <bool> vault-exists: false;
+    in-out property <string> vault-password: "";
     in-out property <int> model-index: 0;
     in-out property <int> target-index: 0;
     in-out property <int> source-index: 0;
@@ -46,6 +49,9 @@ export component ControlWindow inherits Window {
     in-out property <string> status-message: "Slint 桌面迁移预览 · 尚未连接会话后端";
 
     callback start-stop();
+    callback save-settings();
+    callback unlock-vault();
+    callback remove-vault();
     callback refresh-devices();
     callback toggle-overlay-lock();
     callback overlay-scale-changed(float);
@@ -62,6 +68,18 @@ export component ControlWindow inherits Window {
         Text { text: "01 连接配置"; color: #14242c; font-size: 17px; font-weight: 700; }
         Text { text: "Gemini API Key"; color: #44545b; }
         LineEdit { text <=> root.api-key; input-type: password; placeholder-text: "输入 API Key（不会进入普通设置或日志）"; }
+        CheckBox { text: "使用密码加密保存 API Key 和手动代理"; checked <=> root.save-sensitive; }
+        HorizontalBox {
+            spacing: 8px;
+            LineEdit {
+                text <=> root.vault-password;
+                input-type: password;
+                placeholder-text: root.vault-exists ? "输入密码解锁或更新保险库" : "设置至少 8 字符的保险库密码";
+            }
+            Button { text: root.vault-exists ? "解锁" : "创建"; clicked => { root.unlock-vault(); } }
+            Button { enabled: root.vault-exists; text: "删除"; clicked => { root.remove-vault(); } }
+            Button { text: "保存设置"; clicked => { root.save-settings(); } }
+        }
         HorizontalBox {
             spacing: 10px;
             ComboBox {
