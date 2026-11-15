@@ -527,10 +527,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let callback_diagnostics = Rc::clone(&diagnostics);
     control.on_copy_diagnostics(move || {
         if let Some(ui) = weak.upgrade() {
-            let text = callback_diagnostics.borrow().copy_text();
-            ui.window()
-                .set_clipboard_text(&text, slint::Clipboard::Default);
-            ui.set_status_message("已复制脱敏诊断文本".into());
+            match callback_diagnostics.borrow().copy_to_clipboard() {
+                Ok(()) => ui.set_status_message("已复制脱敏诊断文本".into()),
+                Err(error) => ui.set_status_message(error.to_string().into()),
+            }
         }
     });
 

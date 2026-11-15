@@ -1,6 +1,11 @@
 //! Slint adapter for bounded core diagnostics. Credentials are registered at
 //! each network/session trust boundary before any related status is recorded.
 
+use anyhow::{Result, anyhow};
+use std::{
+    io::Write,
+    process::{Command, Stdio},
+};
 use translator_core::diagnostics::{DiagnosticStore, LogLevel, Redactor};
 
 const MAX_COPY_CHARS: usize = 64 * 1024;
@@ -66,8 +71,59 @@ impl NativeDiagnostics {
         output
     }
 
+    pub fn copy_to_clipboard(&self) -> Result<()> {
+        copy_platform_text(&self.copy_text())
+    }
+
     pub fn clear(&self) -> u64 {
         self.store.clear()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn copy_platform_text(text: &str) -> Result<()> {
+    pipe_text(Command::new("cmd").args(["/C", "clip"]), text)
+}
+
+#[cfg(target_os = "macos")]
+fn copy_platform_text(text: &str) -> Result<()> {
+    pipe_text(&mut Command::new("pbcopy"), text)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn copy_platform_text(text: &str) -> Result<()> {
+    if pipe_text(&mut Command::new("wl-copy"), text).is_ok() {
+        return Ok(());
+    }
+    pipe_text(
+        Command::new("xclip").args(["-selection", "clipboard"]),
+        text,
+    )
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+fn copy_platform_text(_text: &str) -> Result<()> {
+    Err(anyhow!("当前平台不支持诊断复制"))
+}
+
+fn pipe_text(command: &mut Command, text: &str) -> Result<()> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| anyhow!("系统剪贴板不可用"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("系统剪贴板不可用"))?
+        .write_all(text.as_bytes())
+        .map_err(|_| anyhow!("系统剪贴板写入失败"))?;
+    let status = child.wait().map_err(|_| anyhow!("系统剪贴板写入失败"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("系统剪贴板写入失败"))
     }
 }
 
