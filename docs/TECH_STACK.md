@@ -21,6 +21,10 @@ Audited on 2026-11-14. The project follows the latest **stable** releases where 
 
 `Cargo.lock` remains the reproducible source of exact transitive Rust versions. Direct dependency lower bounds are aligned with the locked, tested stable line rather than left at broad historical minimums.
 
+## Approved desktop migration
+
+The active desktop baseline remains Tauri 2 until the replacement passes feature parity and target-device gates. The approved sequence is Rust + Slint in v2.1.0, allocation-free callbacks/SPSC transport in v2.2.0, native low-latency platform backends in v2.3.0, clocked mixing in v2.4.0, adaptive VAD in v2.5.0, 10 ms internal frames in v2.6.0, and production hardening in v3.0.0. See [`PC_RUST_SLINT_ROADMAP.md`](PC_RUST_SLINT_ROADMAP.md). No version is advanced merely by adding dependencies or compiling a prototype.
+
 ## Intentionally deferred breaking upgrades
 
 These are not silently forgotten; they are held because this environment cannot compile Cargo/Gradle or run physical-device audio tests.
