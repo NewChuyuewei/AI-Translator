@@ -7,6 +7,7 @@ slint::include_modules!();
 mod config_store;
 mod device_provider;
 mod native_audio;
+mod native_diagnostics;
 mod native_playback;
 mod native_session;
 mod native_transport;
@@ -14,6 +15,7 @@ mod native_transport;
 use anyhow::anyhow;
 use config_store::ConfigStore;
 use device_provider::NativeDeviceProvider;
+use native_diagnostics::NativeDiagnostics;
 use native_session::NativeSessionPort;
 use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::{
@@ -28,6 +30,7 @@ use std::{
 use translator_core::{
     AudioSourceMode, ModelKind, ProxyMode, SessionOptions, ThinkingLevel, TranscriptionMode,
     devices::{AudioDevices, DeviceProvider},
+    diagnostics::LogLevel,
     session_port::{SessionPort, UiEvent},
     settings::PersistedSettings,
     vault::SecretPayload,
@@ -185,6 +188,19 @@ fn device_model(
     Rc::new(VecModel::from(values)).into()
 }
 
+fn apply_diagnostics(ui: &ControlWindow, diagnostics: &NativeDiagnostics) {
+    let lines = diagnostics.lines();
+    let count = lines.len() as i32;
+    let model = if lines.is_empty() {
+        vec![SharedString::from("尚无诊断记录")]
+    } else {
+        lines.into_iter().map(SharedString::from).collect()
+    };
+    ui.set_diagnostic_count(count);
+    ui.set_diagnostic_model(Rc::new(VecModel::from(model)).into());
+    ui.set_diagnostic_index(count.saturating_sub(1));
+}
+
 fn restored_device_index(id: &str, devices: &[translator_core::devices::AudioDeviceInfo]) -> i32 {
     devices
         .iter()
@@ -255,6 +271,11 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let session = Rc::new(RefCell::new(NativeSessionPort::default()));
+    let diagnostics = Rc::new(RefCell::new(NativeDiagnostics::default()));
+    diagnostics
+        .borrow()
+        .record(LogLevel::Info, "Slint 原生桌面已启动");
+    apply_diagnostics(&control, &diagnostics.borrow());
     let device_provider = Rc::new(RefCell::new(NativeDeviceProvider));
     let devices = Rc::new(RefCell::new(AudioDevices::default()));
     let probe_cancel = Arc::new(AtomicBool::new(false));
@@ -268,6 +289,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let weak = control.as_weak();
     let callback_session = Rc::clone(&session);
     let callback_devices = Rc::clone(&devices);
+    let callback_diagnostics = Rc::clone(&diagnostics);
     control.on_start_stop(move || {
         let Some(ui) = weak.upgrade() else {
             return;
@@ -276,19 +298,29 @@ fn main() -> Result<(), slint::PlatformError> {
             callback_session.borrow_mut().stop()
         } else {
             let options = options_from_ui(&ui, &callback_devices.borrow());
+            callback_diagnostics.borrow_mut().begin_boundary(
+                &options.api_key,
+                &options.proxy_url,
+                "请求启动原生会话",
+            );
             callback_devices
                 .borrow()
                 .validate_selection(&options)
                 .and_then(|()| callback_session.borrow_mut().start(&options))
         };
         if let Err(error) = result {
+            callback_diagnostics
+                .borrow()
+                .record(LogLevel::Error, &error.to_string());
             ui.set_status_message(error.to_string().into());
         }
+        apply_diagnostics(&ui, &callback_diagnostics.borrow());
     });
 
     let weak = control.as_weak();
     let callback_devices = Rc::clone(&devices);
     let callback_cancel = Arc::clone(&probe_cancel);
+    let callback_diagnostics = Rc::clone(&diagnostics);
     control.on_probe_transport(move || {
         let Some(ui) = weak.upgrade() else {
             return;
@@ -300,7 +332,17 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         callback_cancel.store(false, Ordering::Release);
         let options = options_from_ui(&ui, &callback_devices.borrow());
+        callback_diagnostics.borrow_mut().begin_boundary(
+            &options.api_key,
+            &options.proxy_url,
+            "请求执行无音频网络验证",
+        );
+        apply_diagnostics(&ui, &callback_diagnostics.borrow());
         if let Err(error) = callback_devices.borrow().validate_selection(&options) {
+            callback_diagnostics
+                .borrow()
+                .record(LogLevel::Error, &error.to_string());
+            apply_diagnostics(&ui, &callback_diagnostics.borrow());
             ui.set_status_message(error.to_string().into());
             return;
         }
@@ -481,9 +523,31 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    let weak = control.as_weak();
+    let callback_diagnostics = Rc::clone(&diagnostics);
+    control.on_copy_diagnostics(move || {
+        if let Some(ui) = weak.upgrade() {
+            match callback_diagnostics.borrow().copy_to_clipboard() {
+                Ok(()) => ui.set_status_message("已复制脱敏诊断文本".into()),
+                Err(error) => ui.set_status_message(error.to_string().into()),
+            }
+        }
+    });
+
+    let weak = control.as_weak();
+    let callback_diagnostics = Rc::clone(&diagnostics);
+    control.on_clear_diagnostics(move || {
+        if let Some(ui) = weak.upgrade() {
+            let watermark = callback_diagnostics.borrow().clear();
+            apply_diagnostics(&ui, &callback_diagnostics.borrow());
+            ui.set_status_message(format!("诊断已清空（水位线 {watermark}）").into());
+        }
+    });
+
     let event_control = control.as_weak();
     let event_caption = caption.as_weak();
     let event_session = Rc::clone(&session);
+    let event_diagnostics = Rc::clone(&diagnostics);
     let session_timer = Timer::default();
     session_timer.start(TimerMode::Repeated, Duration::from_millis(25), move || {
         for _ in 0..32 {
@@ -492,9 +556,16 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             match event {
                 UiEvent::Status(status) => {
+                    let level = if status.phase == translator_core::SessionPhase::Error {
+                        LogLevel::Error
+                    } else {
+                        LogLevel::Info
+                    };
+                    event_diagnostics.borrow().record(level, &status.message);
                     if let Some(ui) = event_control.upgrade() {
                         ui.set_session_running(status.phase.is_active());
                         ui.set_status_message(status.message.into());
+                        apply_diagnostics(&ui, &event_diagnostics.borrow());
                     }
                 }
                 UiEvent::Caption(caption) => {
@@ -505,8 +576,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 UiEvent::Notice(message) => {
+                    event_diagnostics
+                        .borrow()
+                        .record(LogLevel::Warn, message.as_str());
                     if let Some(ui) = event_control.upgrade() {
                         ui.set_status_message(message.as_str().into());
+                        apply_diagnostics(&ui, &event_diagnostics.borrow());
                     }
                 }
             }
