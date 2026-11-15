@@ -5,10 +5,10 @@ export component CaptionWindow inherits Window {
     width: 760px;
     height: 138px;
     background: #101820e8;
-    property <string> original-text: "等待语音输入…";
-    property <string> translated-text: "翻译将在这里显示";
-    property <float> caption-scale: 1.0;
-    property <bool> transcription-only: false;
+    in-out property <string> original-text: "等待语音输入…";
+    in-out property <string> translated-text: "翻译将在这里显示";
+    in-out property <float> caption-scale: 1.0;
+    in-out property <bool> transcription-only: false;
 
     VerticalBox {
         padding: 15px;
