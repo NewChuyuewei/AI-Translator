@@ -38,6 +38,15 @@ export component ControlWindow inherits Window {
     in-out property <int> model-index: 0;
     in-out property <int> target-index: 0;
     in-out property <int> source-index: 0;
+    in-out property <[string]> microphone-model: ["系统默认麦克风"];
+    in-out property <[string]> system-model: ["系统默认音频源"];
+    in-out property <[string]> playback-model: ["系统默认播放设备"];
+    in-out property <int> microphone-index: 0;
+    in-out property <int> system-index: 0;
+    in-out property <int> playback-index: 0;
+    in-out property <string> microphone-device-id: "";
+    in-out property <string> system-device-id: "";
+    in-out property <string> playback-device-id: "";
     in-out property <int> proxy-index: 0;
     in-out property <string> proxy-url: "";
     in-out property <bool> bidirectional: false;
@@ -104,6 +113,12 @@ export component ControlWindow inherits Window {
             spacing: 10px;
             ComboBox { current-index <=> root.source-index; model: ["麦克风", "系统音频", "混合音源"]; }
             Button { text: "刷新设备"; clicked => { root.refresh-devices(); } }
+        }
+        HorizontalBox {
+            spacing: 8px;
+            ComboBox { enabled: root.source-index != 1; current-index <=> root.microphone-index; model: root.microphone-model; }
+            ComboBox { enabled: root.source-index != 0; current-index <=> root.system-index; model: root.system-model; }
+            ComboBox { enabled: root.playback-enabled && root.model-index != 3; current-index <=> root.playback-index; model: root.playback-model; }
         }
         HorizontalBox {
             spacing: 20px;

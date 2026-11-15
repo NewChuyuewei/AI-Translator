@@ -43,7 +43,9 @@
 | SWR-DEV-001 | `devices::AudioDevices::bounded`、`AudioDeviceInfo::bounded` | `swr_dev_001_snapshot_is_bounded_and_control_characters_are_removed` |
 | SWR-DEV-002 | `devices::normalize` | `swr_dev_002_duplicate_ids_and_defaults_are_deterministically_normalized` |
 | SWR-DEV-003 | `AudioDevices::validate_selection` | `swr_dev_003_stale_and_cross_class_selections_are_rejected`、旧 Tauri 枚举回归 |
-| SWR-DEV-004 | `DeviceProvider`、`MemoryDeviceProvider`、Slint `PendingNativeDeviceProvider` | `swr_dev_004_memory_provider_has_deterministic_recovery`、Slint 安全拒绝评审 |
+| SWR-DEV-004 | `DeviceProvider`、`MemoryDeviceProvider`、Slint 快照替换分支 | `swr_dev_004_memory_provider_has_deterministic_recovery`、失败保留代码评审 |
+| SWR-NDEV-001 | Slint `NativeDeviceProvider::refresh`（仅 CPAL 枚举 trait） | workspace/Windows/macOS 编译；API 代码评审；真机待办 `ASSURANCE-TARGET-002` |
+| SWR-NDEV-002 | Slint `apply_devices`、`selected_device`、启动前 `validate_selection` | `swr_ndev_002_ui_indices_preserve_backend_identifiers`、`swr_dev_003_stale_and_cross_class_selections_are_rejected`、真机待办 `ASSURANCE-TARGET-002` |
 
 ## 开放验证项
 
@@ -52,3 +54,4 @@
 - `ASSURANCE-COV-001`：选定并鉴定或人工核查覆盖率工具，建立需求覆盖和结构覆盖报告；
 - `ASSURANCE-INDEP-001`：在具备第二位合格评审者时记录验证独立性；
 - `ASSURANCE-TARGET-001`：Windows/macOS 真机结果必须链接到对应需求，不能用 Linux CI 替代。
+- `ASSURANCE-TARGET-002`：在 Windows/macOS 真机验证 Slint 设备名称、默认端点、热插拔刷新、持久化选择恢复和权限失败；Linux CI 仅证明可编译。

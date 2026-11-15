@@ -17,6 +17,7 @@ repository = "https://github.com/NewChuyuewei/AI-Translator"
 [workspace.dependencies]
 anyhow = "1.0.104"
 base64 = "0.22.1"
+cpal = "0.15.3"
 percent-encoding = "2.3.2"
 ring = "0.17.14"
 serde = { version = "1.0.229", features = ["derive"] }
